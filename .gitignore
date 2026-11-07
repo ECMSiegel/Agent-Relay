@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+
+# Local editor and temporary files
+.DS_Store
+*.tmp.*
+team/.lock*
+HANDOFF.md
+SIMULATION.md
+/examples/First Project/
+/.agents/team/tests/.gitkeep
+
+# Local validation notes, logs, and handoffs
+docs/agent-work/
