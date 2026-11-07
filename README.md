@@ -1,15 +1,14 @@
 # Agent Relay
 
-**A local task board for coding agents in one project folder.** As Chat A nears its usage limit mid-schedule, it records the next step before stopping; Chat B resumes from the project record and submits the edit for review.
+**Agent Relay is a local task board for coding agents.** As Chat A nears its usage limit mid-schedule, it records the next step before stopping; Chat B resumes from the project record and submits the edit for review.
 
-Agent Relay records the work. It does not open chats, select models, or contact a service.
+Board state lives in the target project's `team/` folder; no hosted service or third-party agent harness is required. Your selected coding agent/tool reads project instructions and skills at `.agents/skills/<name>/SKILL.md`—for software QA, editing, or data validation—and performs the actual work.
 
 ## What it does
 
-- Tracks ownership, progress, dependencies, questions, decisions, and handoffs in the project.
-- Reserves registered file paths; overlapping claims are refused while work or review is active.
-- Keeps review independent: owners cannot approve their own work.
-- Includes read-only status and eight portable coordination skills.
+- Tracks task ownership, progress, dependencies, questions, decisions, and handoffs.
+- Reserves files against overlapping claims; task owners cannot approve their own work.
+- Includes read-only status and eight portable skills.
 - Uses Python 3.8+ and the standard library; there is nothing to install.
 
 ## Choose a model for the job
@@ -20,7 +19,7 @@ You control model strength and usage allocation in your coding app. Agent Relay 
 - **Worker:** choose a faster, lower-cost model for a bounded edit such as adding two schedule rows.
 - **Reviewer or replacement:** choose a different capable model for review. If a worker is nearing its limit, hand off before stopping; you choose the next chat's model and budget.
 
-## Start the walkthrough
+## Getting started
 
 Clone [ECMSiegel/Agent-Relay](https://github.com/ECMSiegel/Agent-Relay), then open the same Event Page folder in two chats:
 
@@ -55,7 +54,7 @@ Hand off T001. Record that index.html has the 5:30, 5:45, 6:00, and 6:15 rows; t
 Join and follow team/PROTOCOL.md. Claim T001 and read its full handoff. Add the four remaining rows, remove the note, verify all eight rows are visible and ordered, then submit for independent review. Leave visual polish for later.
 ```
 
-The page progresses from **2 → 4 → 8** visible rows. A different agent reviews the result before T001 is approved.
+You’ll see **2 → 4 → 8** visible rows. A different agent reviews before approving T001.
 
 ## Use an existing project
 
