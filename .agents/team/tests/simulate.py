@@ -652,6 +652,9 @@ def scenario_13(ctx):
     workspace, project = build_workspace("team-sim-worktree-")
     ctx.setdefault("tmp", []).append(workspace.parent)
     _git(project, "init", "-q")
+    # A machine with no global git identity (a CI runner) cannot commit or merge without these.
+    _git(project, "config", "user.name", "Simulation")
+    _git(project, "config", "user.email", "simulation@example.invalid")
     (project / "readme.txt").write_text("hello\n", encoding="utf-8")
     _git(project, "add", "readme.txt")
     code, _, _ = _git(project, "commit", "-q", "-m", "first")
