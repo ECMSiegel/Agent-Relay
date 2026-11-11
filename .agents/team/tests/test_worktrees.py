@@ -116,6 +116,28 @@ class WorktreeTests(WorktreeTestCase):
         self.assertEqual((self.project / "readme.txt").read_text(), "from main\n")
         self.assertTrue(self.wt(task_id).exists())
 
+    def test_merge_refused_by_uncommitted_edits_is_not_called_a_conflict(self):
+        self.join("a1", "a2")
+        task_id = self.to_in_progress("a1")
+        self.commit_in(task_id, "readme.txt", "from task\n")
+        self.ok("done", task_id, "--agent", "a1", "--note", "n")
+        (self.project / "readme.txt").write_text("loose edit\n")
+        err = self.refused("review", task_id, "--agent", "a2", "--approve", "--note", "ok")
+        self.assertNotIn("merge conflict", err)
+        self.assertIn("uncommitted edits", err)
+        self.assertEqual(self.task(task_id)["status"], "review")
+        self.assertEqual((self.project / "readme.txt").read_text(), "loose edit\n")
+        self.assertTrue(self.wt(task_id).exists())
+
+    def test_reclaim_reuses_existing_worktree(self):
+        self.join("a1", "a2")
+        task_id = self.to_in_progress("a1")
+        (self.wt(task_id) / "scratch.txt").write_text("half done\n")
+        out = self.ok("reclaim", task_id, "--agent", "user")
+        self.assertIn("Worktree ready: %s" % self.wt(task_id).resolve(), out)
+        self.assertEqual((self.wt(task_id) / "scratch.txt").read_text(), "half done\n")
+        self.assertEqual(self.task(task_id)["worktree"]["path"], "team/worktrees/T001")
+
     def test_approve_refused_when_base_branch_not_checked_out(self):
         self.join("a1", "a2")
         task_id = self.to_in_progress("a1")

@@ -639,6 +639,64 @@ def scenario_12(ctx):
     return log.done()
 
 
+def _git(folder, *argv):
+    """Run git in folder with a throw-away identity; (code, stdout, stderr)."""
+    proc = subprocess.run(["git", "-C", str(folder), "-c", "user.name=Sim", "-c",
+                           "user.email=sim@example.com"] + list(argv), stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, universal_newlines=True, timeout=60)
+    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+
+def scenario_13(ctx):
+    log = Log()
+    workspace, project = build_workspace("team-sim-worktree-")
+    ctx.setdefault("tmp", []).append(workspace.parent)
+    _git(project, "init", "-q")
+    (project / "readme.txt").write_text("hello\n", encoding="utf-8")
+    _git(project, "add", "readme.txt")
+    code, _, _ = _git(project, "commit", "-q", "-m", "first")
+    _, base, _ = _git(project, "rev-parse", "--abbrev-ref", "HEAD")
+    config_path = project / "team" / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["worktrees"] = True
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    log.check(code == 0 and base, "a temporary git repository with one commit on branch %s" % base)
+    code, out, _ = log.step(project, "join", "--label", "worker")
+    worker = agent_id_from(out)
+    code, out, _ = log.step(project, "join", "--label", "reviewer")
+    reviewer = agent_id_from(out)
+    code, out, _ = log.step(project, "add", "--agent", "user", "--title", "Worktree task",
+                            "--desc", "Add a file", "--files", "feature.txt")
+    task = out.strip().splitlines()[-1]
+    code, out, _ = log.step(project, "claim", task, "--agent", worker)
+    folder = project / "team" / "worktrees" / task
+    log.check(code == 0 and folder.is_dir() and "Worktree ready" in out,
+              "claim creates the task's own working copy")
+    log.step(project, "start", task, "--agent", worker)
+    (folder / "feature.txt").write_text("new work\n", encoding="utf-8")
+    code, out, _ = log.step(project, "done", task, "--agent", worker, "--note", "forgot to commit")
+    log.check(code == 2, "done is refused while the worktree has uncommitted edits")
+    _git(folder, "add", "feature.txt")
+    _git(folder, "commit", "-q", "-m", "add feature")
+    code, out, _ = log.step(project, "done", task, "--agent", worker, "--note", "committed")
+    log.check(code == 0, "done succeeds once the edit is committed")
+    log.check(not (project / "feature.txt").exists(),
+              "the project folder shows no change while the task is in review")
+    code, out, _ = log.step(project, "show", task)
+    log.check("git diff %s...team/%s" % (base, task) in out, "show prints the reviewer's diff line")
+    code, out, _ = log.step(project, "review", task, "--agent", reviewer, "--approve",
+                            "--note", "diff read")
+    log.check(code == 0, "the reviewer approves")
+    log.check((project / "feature.txt").is_file()
+              and (project / "feature.txt").read_text(encoding="utf-8") == "new work\n",
+              "the merged file is present on the base branch")
+    log.check(not folder.exists() and _git(project, "branch", "--list", "team/" + task)[1] == "",
+              "the working copy and its branch are removed")
+    log.check(_git(project, "status", "--porcelain")[1] == "", "the project folder is clean")
+    log.check(not leftover_locks(project), "no lock is left behind")
+    return log.done()
+
+
 SCENARIOS = [
     ("Scenario 0 - lock fail-first proof (doctored tool must double-claim, real tool must not)", scenario_0),
     ("Scenario 1 - four agents join at once", scenario_1),
@@ -653,6 +711,7 @@ SCENARIOS = [
     ("Scenario 10 - review gate and project completion", scenario_10),
     ("Scenario 11 - coordinator overrides a live owner, then releases the task", scenario_11),
     ("Scenario 12 - wait returns when another process opens a question", scenario_12),
+    ("Scenario 13 - a worktree task from claim to merge on the base branch", scenario_13),
 ]
 
 

@@ -42,9 +42,9 @@ the ignored `docs/agent-work/` directory for local review.
 
 ## Current gate status
 
-- **Source unit suite:** passed locally, 184 tests.
-- **Concurrent simulation:** passed locally, 11 scenarios.
-- **Extracted package smoke:** passed locally on the `0.1.0` ZIP. The archive's 26 entries
+- **Source unit suite:** passed locally, 235 tests.
+- **Concurrent simulation:** passed locally, 14 scenarios.
+- **Extracted package smoke:** passed locally on the `0.2.0` ZIP. The archive's 32 entries
   exactly matched the archive manifest and used the expected single visible root.
 - **Two-chat extracted candidate trial:** Chat A and Chat B completed in a separate fresh
   extraction; static content checks passed. Independent review left T001 pending because browser
@@ -70,5 +70,6 @@ Only after the owner approves the final contents, archive, and validation:
 5. Create a draft release in the selected hosting service, attach the reviewed
    `dist/agent-coordination-v0.2.0.zip`, and leave it unpublished until the owner approves it.
 
-These are future steps only. This session has not committed, configured a remote, pushed, or
-published anything.
+These are future steps only. The 0.2.0 work is committed locally on the branch
+`feature/board-stalls-worktrees`; it has not been pushed, tagged, or published, and no GitHub
+Release exists.

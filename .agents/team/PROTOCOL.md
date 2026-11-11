@@ -312,6 +312,37 @@ Commits:
   criterion cannot pass `complete`.
 - When `complete` prints `COMPLETE`, tell the user, run `leave`, and stop.
 
+## Task worktrees (optional)
+
+Off by default. In a git project, set `"worktrees": true` in `team/config.json` and each task gets
+its own working copy, so one agent's half-done edits cannot trip over another's.
+
+- **Turn on.** Edit `team/config.json`. The project folder must be the top of its git repository,
+  on a branch with at least one commit, and git must not track any file under `team/` (the tool
+  adds `/team/` to `.git/info/exclude` for you). Otherwise `claim` is refused with the reason.
+- **Where.** `claim` (and `reclaim`) creates the folder `team/worktrees/<T>` on a branch named
+  `team/<T>` and prints both the folder and the exact `team.py` command to run. Work and commit
+  only inside that folder, and run team commands with the printed path. Absolute paths inside the
+  folder are understood by `owner` and `files add`.
+- **Handoff.** `handoff` leaves the folder and any edits in it for the next owner, who gets the
+  same folder when they claim or reclaim the task.
+- **Finish.** `done` is refused while the worktree has uncommitted edits: commit them there first.
+- **Review.** The project folder shows no change until approval. A reviewer reads the work with
+  the `git diff <base>...team/<T>` line that `show` prints (for example
+  `git diff main...team/T003`), not with a plain `git diff`.
+- **Approval merges.** Approving (or `done` on a task that needs no review) merges `team/<T>` into
+  the base branch, which must be the branch checked out in the project folder, then removes the
+  folder and the branch. If the merge hits a conflict, the tool undoes the merge, keeps the task in
+  `review`, and refuses: reject the task with a note so the owner can fix the branch. If git
+  refuses the merge because the project folder has uncommitted edits, commit or stash them and
+  approve again.
+- **Timing.** Each git call is cut off after 15 seconds. A claim runs several git calls and holds
+  the lock while it does, and a lock older than 20 seconds is treated as stale, so on a very slow
+  disk or a huge repository a claim can fail or collide with another command. Run `claim` again.
+- **Searching.** Every worktree holds a full copy of the project under `team/worktrees/`, so a
+  plain recursive `grep -r` from the project folder also lists those copies. Search inside
+  `src/` (or exclude `team/worktrees`), and keep test runners from scanning `team/`.
+
 ## Solo mode
 
 One agent alone follows the same loop. Tasks that require review wait in `review` because the

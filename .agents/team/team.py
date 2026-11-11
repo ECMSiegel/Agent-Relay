@@ -2402,7 +2402,7 @@ def _notify_desktop(title: str, text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-GIT_TIMEOUT_SECONDS = 15  # the team lock is broken after 20 seconds
+GIT_TIMEOUT_SECONDS = 15  # per git call; a claim runs several, so the total can pass the 20-second lock break
 
 
 def _wt_git(root: Path, *argv: str) -> tuple:
@@ -2503,12 +2503,16 @@ def _wt_on_finish(team_dir: Path, task: dict) -> None:
                      "run: git -C %s checkout %s" % (root, wt["base"]))
     code, _, err = _wt_git(root, "merge", "--no-ff", "--no-edit", wt["branch"])
     if code != 0:
+        first = (err.splitlines() or ["git merge failed"])[0]
         if _wt_git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")[0] == 0:
             _wt_git(root, "merge", "--abort")
-        raise refuse("merge conflict merging %s into %s (%s)" % (
-            wt["branch"], wt["base"], (err.splitlines() or ["git merge failed"])[0]),
-            'reject the task with a note: review %s --agent <ID> --reject --note "merge conflict '
-            'with %s; rebase %s and fix it"' % (task["id"], wt["base"], wt["branch"]))
+            raise refuse("merge conflict merging %s into %s (%s)" % (wt["branch"], wt["base"], first),
+                         'reject the task with a note: review %s --agent <ID> --reject --note '
+                         '"merge conflict with %s; rebase %s and fix it"'
+                         % (task["id"], wt["base"], wt["branch"]))
+        raise refuse("git refused to merge %s into %s (%s); this usually means the project folder "
+                     "has uncommitted edits" % (wt["branch"], wt["base"], first),
+                     "commit or stash the edits in %s, then approve again" % root)
     if folder.is_dir():
         code, _, err = _wt_git(root, "worktree", "remove", str(folder))
         if code != 0:

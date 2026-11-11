@@ -24,7 +24,9 @@ reviews with `--agent user`.
    `git diff -- "<path>"` (and `git log -3 -- "<path>"` if the work was committed). Otherwise read the
    files against the `done` note. To spot changes outside the registered paths, run `git status`
    and `git diff` on the whole project when it is a git repository; otherwise compare file
-   timestamps. Do not edit any of those paths while reviewing; a fix is the owner's job after a
+   timestamps. If `show` prints a `Review with: git diff <base>...team/<T>` line, the task has its
+   own worktree and the project folder shows nothing yet: read the work with that exact command
+   instead of the plain `git diff`. Do not edit any of those paths while reviewing; a fix is the owner's job after a
    reject.
 5. Run the verification the task description names, and the checks in the "How to verify" section
    of `team/PLAN.md` that apply. Read the whole output. A pass you did not see is not a pass.

@@ -15,6 +15,7 @@ independent review without moving or rewriting the project's source files.
 - A coordinator role (`join --role coordinator`), `msg --to coordinator`, automatic coordinator
   alerts, `reclaim` override and `--release`, and `busy` so long steps are not called stale.
 - `usage` (self-reported), `wait` (for coordinators) and `watch` (Mac notifications) commands.
+- Optional per-task git worktrees (`"worktrees": true`): a task's work stays in its own folder and branch until its approval merges it.
 - Eight portable team skills for setup, joining, task creation, handoff, review, status, answers,
   and board diagnosis.
 - Protocol and human documentation, plus an Event Page starter fixture for a fresh setup.
@@ -22,8 +23,8 @@ independent review without moving or rewriting the project's source files.
 
 ## Validation recorded locally
 
-- 221 unit tests passed on the development machine.
-- All 13 concurrent simulation scenarios passed on the development machine.
+- 235 unit tests passed on the development machine.
+- All 14 concurrent simulation scenarios passed on the development machine.
 - A two-agent interruption, handoff, and review trial is documented in the local work records.
 
 These results are scoped local evidence. They do not establish support on every vendor host or an
