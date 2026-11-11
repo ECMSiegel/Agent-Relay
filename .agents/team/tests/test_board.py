@@ -58,7 +58,11 @@ class BoardTests(LifecycleTestCase):
                       next(task["title"] for task in data["tasks"]
                            if task["title"].startswith("</script>")))
         self.assertNotRegex(html, r"https?://")
-        self.assertIn('<meta http-equiv="refresh" content="5">', html)
+        # A meta refresh drops the URL hash and closes the open task panel; reload from script.
+        self.assertNotIn('http-equiv="refresh"', html)
+        self.assertIn("window.location.reload()", html)
+        self.assertIn('sessionStorage.setItem("agent-relay-board-open"', html)
+        self.assertIn('sessionStorage.getItem("agent-relay-board-open")', html)
         self.assertIn("prefers-color-scheme", html)
         self.assertIn("textContent", html)
         self.assertNotIn("innerHTML", html)
@@ -110,6 +114,15 @@ class BoardTests(LifecycleTestCase):
         self.assertRegex(board, r"1 stale agent hidden \(status --all lists them\)")
         all_agents = self.ok("status", "--all")
         self.assertIn("| stale |", all_agents)
+
+    def test_idle_stale_coordinator_stays_on_the_board(self):
+        self.ok("join", "--agent", "lead", "--role", "coordinator")
+        self.set_last_seen("lead", 31)
+        self.add("Trigger rendering")
+        board = self.view("BOARD.md")
+        self.assertIn("| lead |", board)
+        self.assertNotIn("stale agent hidden", board)
+        self.assertIn('agent.role === "coordinator") return true', self.board())
 
     def test_board_data_is_valid_and_doctor_accepts_it(self):
         html = self.board()

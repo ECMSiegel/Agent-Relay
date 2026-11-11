@@ -17,9 +17,10 @@ class SeamTests(LifecycleTestCase):
         self.assertIsNone(self.agent("z-coord")["busy_until"])
         config = self.tool.load_config(self.team)
         self.assertEqual(self.tool.coordinator_ids(self.team, config), ["a-coord", "z-coord"])
-        self.set_last_seen("z-coord", 31)
-        self.assertEqual(self.tool.coordinator_ids(self.team, config), ["a-coord"])
+        self.set_last_seen("z-coord", 31)  # stale coordinators still get their messages
+        self.assertEqual(self.tool.coordinator_ids(self.team, config), ["a-coord", "z-coord"])
         self.ok("leave", "--agent", "z-coord")
+        self.assertEqual(self.tool.coordinator_ids(self.team, config), ["a-coord"])
         self.ok("join", "--agent", "z-coord", "--role", "coordinator")
         self.assertEqual(self.tool.coordinator_ids(self.team, config), ["a-coord", "z-coord"])
 

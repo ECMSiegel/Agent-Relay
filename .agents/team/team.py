@@ -422,10 +422,10 @@ def is_stale(agent: dict, stale_minutes: float) -> bool:
 
 
 def coordinator_ids(team_dir: Path, config: dict) -> list:
-    """Return active, non-stale coordinator IDs in stable order."""
+    """Return the IDs of coordinators who have not left, in stable order. A stale coordinator is
+    kept: a message is only an inbox entry, and it must be there when the coordinator returns."""
     return sorted(agent["id"] for agent in load_agents(team_dir)
-                  if agent.get("role") == "coordinator" and agent.get("status") == "active"
-                  and not is_stale(agent, config["stale_minutes"]))
+                  if agent.get("role") == "coordinator" and agent.get("status") == "active")
 
 
 def attention_items(team_dir: Path, config: dict) -> list:
@@ -651,13 +651,13 @@ def render_board(team_dir: Path, config: dict, show_left: bool = False) -> str:
     reserved_owners = {task.get("owner") for task in tasks
                        if task.get("status") in RESERVATION_STATUSES and task.get("owner")}
     hidden_left = sum(1 for agent in agents if agent.get("status") == "left")
-    hidden_stale = sum(1 for agent in agents if agent.get("status") != "left"
-                       and agent["id"] not in reserved_owners
-                       and is_stale(agent, config["stale_minutes"]))
-    rows = agents if show_left else [agent for agent in agents
-                                     if agent.get("status") != "left"
-                                     and not (agent["id"] not in reserved_owners
-                                              and is_stale(agent, config["stale_minutes"]))]
+    # An idle stale worker is noise; a coordinator is always shown, stale or not.
+    idle_stale = {agent["id"] for agent in agents if agent.get("status") != "left"
+                  and agent["id"] not in reserved_owners and agent.get("role") != "coordinator"
+                  and is_stale(agent, config["stale_minutes"])}
+    hidden_stale = len(idle_stale)
+    rows = agents if show_left else [agent for agent in agents if agent.get("status") != "left"
+                                     and agent["id"] not in idle_stale]
     if agents:
         out.append("| ID | Label | Status | Current task | Last seen | Stale | Usage |")
         out.append("|---|---|---|---|---|---|---|")
@@ -2000,7 +2000,6 @@ def render_board_html(team_dir: Path, config: dict) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="5">
 <title>Agent Relay board — __TITLE__</title>
 <style>
 :root { color-scheme: light dark; font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --bg:#f5f7fa; --panel:#fff; --ink:#1c2430; --muted:#5b6573; --line:#d7dde5; --accent:#3156a6; --alert:#9d2f21; --good:#226044; }
@@ -2090,6 +2089,7 @@ h1, h2, h3, p { margin-top:0; }
     var panel = document.getElementById("detail-panel");
     while (panel.firstChild) panel.removeChild(panel.firstChild);
     panel.hidden = true;
+    try { sessionStorage.removeItem("agent-relay-board-open"); } catch (error) { /* no storage */ }
     if (window.history && window.history.replaceState) {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
     } else {
@@ -2127,6 +2127,8 @@ h1, h2, h3, p { margin-top:0; }
       timeline.appendChild(make("li", "", entry.at + " — " + entry.agent + " — " + entry.event + note));
     });
     panel.appendChild(timeline);
+    // Remembered twice: some browsers drop the URL hash when the page reloads itself.
+    try { sessionStorage.setItem("agent-relay-board-open", task.id); } catch (error) { /* no storage */ }
     if (window.location.hash !== "#" + encodeURIComponent(task.id)) {
       window.location.hash = encodeURIComponent(task.id);
     }
@@ -2160,7 +2162,7 @@ h1, h2, h3, p { margin-top:0; }
 
   var visibleAgents = agents.filter(function (agent) {
     if (agent.status === "left") return false;
-    if (!isStale(agent)) return true;
+    if (!isStale(agent) || agent.role === "coordinator") return true;
     return tasks.some(function (task) {
       return task.owner === agent.id && ["claimed", "in_progress", "blocked", "review"].indexOf(task.status) !== -1;
     });
@@ -2243,12 +2245,18 @@ h1, h2, h3, p { margin-top:0; }
 
   function openHashTask() {
     var id = "";
-    try { id = decodeURIComponent(window.location.hash.slice(1)); } catch (error) { return; }
+    try { id = decodeURIComponent(window.location.hash.slice(1)); } catch (error) { id = ""; }
+    if (!id) {
+      try { id = sessionStorage.getItem("agent-relay-board-open") || ""; } catch (error) { id = ""; }
+    }
     var found = tasks.find(function (task) { return task.id === id; });
     if (found) openTask(found);
   }
   window.addEventListener("hashchange", openHashTask);
   openHashTask();
+  // Reload from script, not a meta refresh: a meta refresh drops the URL hash, which closed the
+  // open task panel every five seconds.
+  window.setTimeout(function () { window.location.reload(); }, 5000);
   try {
     var oldScroll = sessionStorage.getItem("agent-relay-board-scroll");
     if (oldScroll !== null) window.scrollTo(0, Number(oldScroll));
@@ -2485,9 +2493,9 @@ def _wt_check_done(team_dir: Path, task: dict) -> None:
         return
     _, changes, _ = _wt_git(folder, "status", "--porcelain")
     if changes:
-        raise refuse("%s has uncommitted edits in its worktree %s" % (task["id"], folder),
-                     "commit them there (git -C %s add -A && git commit -m ...), then run done "
-                     "again" % folder)
+        raise refuse("%s has uncommitted edits in its worktree %s; commit them there first "
+                     "(git add, then git commit)" % (task["id"], folder),
+                     'done %s --agent %s --note "..."' % (task["id"], task.get("owner")))
 
 
 def _wt_on_finish(team_dir: Path, task: dict) -> None:
