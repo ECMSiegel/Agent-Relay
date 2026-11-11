@@ -520,6 +520,9 @@ def normalize_stored_path(team_dir: Path, path: str) -> str:
         spelled = full.relative_to(root).as_posix()
     except ValueError:
         spelled = full.as_posix()
+    inside = re.match(r"team/worktrees/[^/]+/(.+)$", spelled)
+    if inside:
+        spelled = inside.group(1)
     keep_slash = raw.endswith("/") and not spelled.endswith("/") and spelled != "."
     return spelled + "/" if keep_slash else spelled
 
@@ -746,6 +749,14 @@ def format_task(task: dict, tasks_by_id: dict | None = None, trim_log: bool = Fa
         dep = tasks_by_id.get(dep_id)
         deps.append("%s (%s)" % (dep_id, dep["status"] if dep else "missing"))
     out.append("Depends on: %s" % (", ".join(deps) or "none"))
+    worktree = task.get("worktree")
+    if worktree and not worktree.get("merged"):
+        try:
+            folder = resolve_team_dir().resolve().parent / worktree["path"]
+        except TeamError:
+            folder = Path(worktree["path"])
+        out.append("Worktree: %s" % folder)
+        out.append("Review with: git diff %s...%s" % (worktree["base"], worktree["branch"]))
     out.append("Registered paths:")
     out += ["  - %s" % f for f in task.get("files", [])] or ["  (none)"]
     out.append("Description:")
@@ -1894,16 +1905,122 @@ def cmd_watch(team_dir: Path, args, agent: str | None) -> int:
 # ---------------------------------------------------------------------------
 
 
+GIT_TIMEOUT_SECONDS = 15  # the team lock is broken after 20 seconds
+
+
+def _wt_git(root: Path, *argv: str) -> tuple:
+    """Run git in root; return (exit code, stdout, stderr). A git that hangs is a refusal."""
+    try:
+        result = subprocess.run(["git", "-C", str(root)] + list(argv), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, universal_newlines=True,
+                                timeout=GIT_TIMEOUT_SECONDS)
+    except FileNotFoundError:
+        raise refuse("worktrees need git, which was not found",
+                     'set "worktrees": false in team/config.json to work without worktrees')
+    except subprocess.TimeoutExpired:
+        raise refuse("git %s took longer than %s seconds" % (" ".join(argv[:2]),
+                                                              GIT_TIMEOUT_SECONDS),
+                     "check the repository, then try again")
+    return result.returncode, result.stdout.strip(), result.stderr.strip()
+
+
+def _wt_root(team_dir: Path) -> Path:
+    return Path(team_dir).resolve().parent
+
+
+def _wt_paths(team_dir: Path, task: dict) -> tuple:
+    wt = task["worktree"]
+    return _wt_root(team_dir), _wt_root(team_dir) / wt["path"], wt
+
+
 def _wt_on_take(team_dir: Path, task: dict) -> list:
-    return []
+    """Give the task its own git working copy (config "worktrees": true); return lines to print."""
+    if not load_config(team_dir).get("worktrees"):
+        return []
+    root = _wt_root(team_dir)
+    hint = 'set "worktrees": false in team/config.json to work without worktrees'
+    code, top, _ = _wt_git(root, "rev-parse", "--show-toplevel")
+    if code != 0:
+        raise refuse("worktrees need the project folder to be a git repository", hint)
+    if Path(top).resolve() != root:
+        raise refuse("worktrees need the project folder to be the top of its git repository "
+                     "(the top is %s)" % top, hint)
+    code, tracked, _ = _wt_git(root, "ls-files", "team")
+    if tracked:
+        raise refuse("worktrees need team/ to be untracked, but git tracks files in it", hint)
+    code, branch, _ = _wt_git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    if code != 0 or branch == "HEAD":
+        raise refuse("worktrees need the project folder to be on a branch with at least one "
+                     "commit", hint)
+    if _wt_git(root, "check-ignore", "-q", "team")[0] != 0:
+        _, exclude, _ = _wt_git(root, "rev-parse", "--git-path", "info/exclude")
+        exclude_path = Path(exclude) if os.path.isabs(exclude) else root / exclude
+        exclude_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(exclude_path), "a", encoding="utf-8") as handle:
+            handle.write("\n/team/\n")
+    task_id = task["id"]
+    rel = "team/worktrees/%s" % task_id
+    folder = root / rel
+    team_branch = "team/%s" % task_id
+    if not folder.is_dir():
+        if _wt_git(root, "show-ref", "--verify", "--quiet", "refs/heads/" + team_branch)[0] == 0:
+            command = ["worktree", "add", str(folder), team_branch]
+        else:
+            command = ["worktree", "add", str(folder), "-b", team_branch]
+        code, _, err = _wt_git(root, *command)
+        if code != 0:
+            raise refuse("could not create the worktree: %s" % (err.splitlines() or ["git failed"])[-1],
+                         hint)
+    previous = task.get("worktree") or {}
+    task["worktree"] = {"path": rel, "branch": team_branch, "base": previous.get("base") or branch}
+    return ["Worktree ready: %s" % folder,
+            "Work and commit only there. Run team commands as: python3 %s <command> --agent <ID>"
+            % (Path(team_dir).resolve() / "team.py")]
 
 
 def _wt_check_done(team_dir: Path, task: dict) -> None:
-    return None
+    """Refuse to finish a task whose worktree has uncommitted edits."""
+    wt = task.get("worktree")
+    if not wt or wt.get("merged"):
+        return
+    root, folder, _ = _wt_paths(team_dir, task)
+    if not folder.is_dir():
+        return
+    _, changes, _ = _wt_git(folder, "status", "--porcelain")
+    if changes:
+        raise refuse("%s has uncommitted edits in its worktree %s" % (task["id"], folder),
+                     "commit them there (git -C %s add -A && git commit -m ...), then run done "
+                     "again" % folder)
 
 
 def _wt_on_finish(team_dir: Path, task: dict) -> None:
-    return None
+    """Merge the task's branch into its base branch, then remove the worktree and branch."""
+    wt = task.get("worktree")
+    if not wt or wt.get("merged"):
+        return
+    root, folder, _ = _wt_paths(team_dir, task)
+    _, current, _ = _wt_git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    if current != wt["base"]:
+        raise refuse("%s must be merged into %s, but the project folder has %s checked out"
+                     % (task["id"], wt["base"], current),
+                     "run: git -C %s checkout %s" % (root, wt["base"]))
+    code, _, err = _wt_git(root, "merge", "--no-ff", "--no-edit", wt["branch"])
+    if code != 0:
+        if _wt_git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")[0] == 0:
+            _wt_git(root, "merge", "--abort")
+        raise refuse("merge conflict merging %s into %s (%s)" % (
+            wt["branch"], wt["base"], (err.splitlines() or ["git merge failed"])[0]),
+            'reject the task with a note: review %s --agent <ID> --reject --note "merge conflict '
+            'with %s; rebase %s and fix it"' % (task["id"], wt["base"], wt["branch"]))
+    if folder.is_dir():
+        code, _, err = _wt_git(root, "worktree", "remove", str(folder))
+        if code != 0:
+            raise refuse("merged %s but could not remove %s: %s" % (
+                wt["branch"], folder, (err.splitlines() or ["git failed"])[-1]),
+                "remove it with: git -C %s worktree remove --force %s, then approve again"
+                % (root, folder))
+    _wt_git(root, "branch", "-d", wt["branch"])
+    wt["merged"] = True
 
 
 # ---------------------------------------------------------------------------
