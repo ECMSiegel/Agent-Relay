@@ -42,7 +42,7 @@ the ignored `docs/agent-work/` directory for local review.
 
 ## Current gate status
 
-- **Source unit suite:** passed locally, 235 tests.
+- **Source unit suite:** passed locally, 241 tests.
 - **Concurrent simulation:** passed locally, 14 scenarios.
 - **Extracted package smoke:** passed locally on the `0.2.0` ZIP. The archive's 32 entries
   exactly matched the archive manifest and used the expected single visible root.

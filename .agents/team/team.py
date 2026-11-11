@@ -2436,22 +2436,45 @@ def cmd_watch(team_dir: Path, args, agent: str | None) -> int:
         raise TeamError("interval must be greater than zero")
     seen = set()
     config = load_config(team_dir)
+    if not args.no_notify and sys.platform == "darwin":
+        print(WATCH_SETUP_NOTE, flush=True)
     try:
         while True:
             items = attention_items(team_dir, config)
             seen &= {item["key"] for item in items}
-            for item in items:
-                if item["key"] in seen:
-                    continue
+            fresh = [item for item in items if item["key"] not in seen]
+            for item in fresh:
                 seen.add(item["key"])
                 print("%s %s" % (now_iso(), item["text"]), flush=True)
                 if not args.no_notify:
                     _notify_desktop("Agent Relay: %s" % project_name(team_dir), item["text"])
+            if fresh and not args.no_notify:
+                _play_sound()  # once per pass, however many items arrived together
             if args.once:
                 return 0
             time.sleep(float(args.interval))
     except KeyboardInterrupt:
         return 0
+
+
+WATCH_SETUP_NOTE = (
+    "A sound plays for each alert. Banners need a one-time macOS setup: open Script Editor, run\n"
+    '  display notification "test"\n'
+    "and click Allow. Banners do not show while Do Not Disturb or a Focus is on.")
+ALERT_SOUND = "/System/Library/Sounds/Glass.aiff"
+
+
+def _play_sound() -> bool:
+    """Play a short system sound without waiting for it. Unlike a banner it needs no permission,
+    so an alert is still noticed when banners are blocked."""
+    if sys.platform != "darwin" or not shutil.which("afplay") or not os.path.isfile(ALERT_SOUND):
+        return False
+    try:
+        subprocess.Popen(["afplay", ALERT_SOUND], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True
 
 
 def _notify_desktop(title: str, text: str) -> bool:

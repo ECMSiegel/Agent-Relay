@@ -376,7 +376,8 @@ Choose any coding tool or model that can read the project and run its commands.
 - For the person, `team/BOARD.html` is a picture of the board: one lane per agent, a "Needs you"
   strip, each agent's reported usage, and a detail panel for any task. Double-click it to open it in
   a browser; it reloads itself every 5 seconds and shows STALE without any command being run. To
-  get a desktop notification on a Mac, run `python3 team/team.py watch` in a terminal.
+  be alerted on a Mac, run `python3 team/team.py watch` in a terminal: it plays a sound and shows a
+  banner for each new item. Banners need a one-time setup, which `watch` prints when it starts.
 - Use `status` to inspect progress. If a worker needs an explicit activity check-in, it can run
   `next --agent <ID>`; there is no automatic monitor or scheduler.
 - At a natural stopping point, have the worker hand off unfinished work and open another chat only
@@ -491,7 +492,9 @@ Usage, waiting and watching:
   the timeout print `NOTHING NEW`. For coordinators. It never takes the lock except a brief
   check-in. Exit 2: the unknown-agent rule.
 - `watch [--interval <seconds>] [--once] [--no-notify]` — print each new thing that needs attention
-  and show a macOS notification. For a person, in a terminal; stop with Ctrl-C. Needs no agent ID.
+  and, on macOS, play a sound and show a banner (`--no-notify` turns both off). Banners need
+  Script Editor to be allowed to notify once and do not show during Do Not Disturb; the sound
+  needs nothing. For a person, in a terminal; stop with Ctrl-C. Needs no agent ID.
 
 Messages and records:
 - `msg --agent <ID> --to all|coordinator|<agent ID> --kind finding|question|warning|request|handoff|review|info
