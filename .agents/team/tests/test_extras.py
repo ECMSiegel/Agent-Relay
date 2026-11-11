@@ -293,12 +293,14 @@ class DoctorTests(LifecycleTestCase):
 
 
 class HelpTests(LifecycleTestCase):
-    def test_help_lists_31_commands_including_the_new_two(self):
+    def test_help_lists_35_commands_including_the_new_features(self):
         out = self.ok("--help")
         rows = [ln for ln in out.splitlines() if ln[:2] == "  " and ln[2:3].islower()]
-        self.assertEqual(len(rows), 31)
+        self.assertEqual(len(rows), 35)
         self.assertTrue(any(r.startswith("  check-exit ") for r in rows))
         self.assertTrue(any(r.startswith("  doctor ") for r in rows))
+        for command in ("usage", "busy", "wait", "watch"):
+            self.assertTrue(any(r.startswith("  %s " % command) for r in rows), command)
 
 
 if __name__ == "__main__":

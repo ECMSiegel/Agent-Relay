@@ -36,6 +36,9 @@ DEFAULT_CONFIG = {
     "lock_stale_seconds": 20,
     "review_default": True,
     "git_commit": False,
+    "usage_warn_percent": 80,
+    "worktrees": False,
+    "busy_max_minutes": 120,
 }
 
 STATUSES = ("available", "claimed", "in_progress", "blocked", "review", "done")
@@ -44,7 +47,7 @@ LIVE_STATUSES = ("claimed", "in_progress", "blocked")
 # continue to claim or start. Keep these state sets separate so review does not trap the author.
 RESERVATION_STATUSES = LIVE_STATUSES + ("review",)
 USER = "user"
-RESERVED_IDS = (USER, "all")
+RESERVED_IDS = (USER, "all", "coordinator")
 AGENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 TASK_ID_RE = re.compile(r"^T\d{3,}$")
 MESSAGE_KINDS = ("finding", "question", "warning", "request", "handoff", "review", "info")
@@ -408,8 +411,83 @@ def save_agent(team_dir: Path, agent: dict) -> None:
 def is_stale(agent: dict, stale_minutes: float) -> bool:
     if agent.get("status") != "active" or not agent.get("last_seen"):
         return False
+    busy_until = agent.get("busy_until")
+    if busy_until and parse_iso(busy_until) > datetime.now(timezone.utc):
+        return False
     age = datetime.now(timezone.utc) - parse_iso(agent["last_seen"])
     return age > timedelta(minutes=float(stale_minutes))
+
+
+def coordinator_ids(team_dir: Path, config: dict) -> list:
+    """Return active, non-stale coordinator IDs in stable order."""
+    return sorted(agent["id"] for agent in load_agents(team_dir)
+                  if agent.get("role") == "coordinator" and agent.get("status") == "active"
+                  and not is_stale(agent, config["stale_minutes"]))
+
+
+def attention_items(team_dir: Path, config: dict) -> list:
+    """Return the current team events that need a person or coordinator to notice them."""
+    items = []
+    questions = sorted((read_json(path) for path in (Path(team_dir) / "questions").glob("Q*.json")),
+                       key=lambda question: question.get("id", ""))
+    for question in questions:
+        if question.get("status") == "open":
+            qid = question["id"]
+            items.append({"key": "question:%s" % qid, "kind": "question",
+                          "task": question.get("task"), "text": "Question %s is open." % qid})
+
+    tasks = load_tasks(team_dir)
+    agents = {agent["id"]: agent for agent in load_agents(team_dir)}
+    questions_by_id = {question.get("id"): question for question in questions}
+    for task in tasks:
+        if task.get("status") == "review":
+            tid = task["id"]
+            items.append({"key": "review:%s" % tid, "kind": "review", "task": tid,
+                          "text": "Task %s is awaiting review." % tid})
+
+    for task in tasks:
+        owner = task.get("owner")
+        if task.get("status") not in LIVE_STATUSES or not owner or owner == USER:
+            continue
+        owner_record = agents.get(owner)
+        if owner_record is None or owner_record.get("status") == "left" or is_stale(
+                owner_record, config["stale_minutes"]):
+            tid = task["id"]
+            items.append({"key": "stale_owner:%s:%s" % (tid, owner), "kind": "stale_owner",
+                          "task": tid, "text": "Task %s has stale or left owner %s." % (tid, owner)})
+
+    for task in tasks:
+        if task.get("status") != "blocked":
+            continue
+        qid = None
+        for entry in reversed(task.get("log", [])):
+            if entry.get("event") == "blocked":
+                match = re.match(r"^(Q\d{3,}):", entry.get("note", ""))
+                if match:
+                    qid = match.group(1)
+                break
+        if qid and questions_by_id.get(qid, {}).get("status") == "resolved":
+            tid = task["id"]
+            items.append({"key": "answered:%s" % tid, "kind": "answered", "task": tid,
+                          "text": "The question blocking %s has been answered." % tid})
+
+    threshold = int(config.get("usage_warn_percent", 80))
+    for agent in sorted(agents.values(), key=lambda record: record.get("id", "")):
+        usage = agent.get("usage") or {}
+        percent = usage.get("percent")
+        if agent.get("status") == "active" and percent is not None and percent >= threshold:
+            aid = agent["id"]
+            items.append({"key": "usage_high:%s" % aid, "kind": "usage_high", "task": None,
+                          "text": "%s reported usage at %s%%." % (aid, percent)})
+
+    if claimable_tasks(team_dir, tasks) and not any(
+            task.get("status") in LIVE_STATUSES for task in tasks):
+        items.append({"key": "idle", "kind": "idle", "task": None,
+                      "text": "Claimable work is waiting and no task is active."})
+    if tasks and all(task.get("status") == "done" for task in tasks):
+        items.append({"key": "complete", "kind": "complete", "task": None,
+                      "text": "All tasks are done."})
+    return items
 
 
 def add_log(task: dict, agent: str, event: str, note: str = "") -> None:
@@ -759,7 +837,7 @@ def cmd_join(team_dir: Path, args, agent: str | None) -> int:
     if agent:
         if agent.lower() in RESERVED_IDS or not AGENT_ID_RE.match(agent):
             raise TeamError("invalid agent ID %r: use letters, digits, '.', '_' or '-' "
-                            "(not 'user' or 'all')" % agent)
+                            "(not 'user', 'all' or 'coordinator')" % agent)
         clash = existing.get(agent.lower())
         if clash is not None and clash != agent:
             raise refuse("agent ID %s clashes with existing agent %s (IDs ignore case)"
@@ -774,6 +852,10 @@ def cmd_join(team_dir: Path, args, agent: str | None) -> int:
             record["last_seen"] = now_iso()
             if args.label is not None:
                 record["label"] = args.label
+            if args.role is not None:
+                record["role"] = args.role
+            record.setdefault("role", None)
+            record.setdefault("busy_until", None)
             save_agent(team_dir, record)
             print("You are %s. Pass --agent %s on every command." % (agent, agent))
             return 0
@@ -788,7 +870,7 @@ def cmd_join(team_dir: Path, args, agent: str | None) -> int:
     cursor = max([m.get("id", 0) for m in messages] or [0])
     save_agent(team_dir, {"id": new_id, "label": args.label or "", "joined_at": stamp,
                           "last_seen": stamp, "status": "active", "current_task": None,
-                          "inbox_cursor": cursor})
+                          "inbox_cursor": cursor, "role": args.role, "busy_until": None})
     print("You are %s. Pass --agent %s on every command." % (new_id, new_id))
     return 0
 
@@ -838,6 +920,7 @@ def cmd_claim(team_dir: Path, args, agent: str) -> int:
         raise refuse('%s path "%s" overlaps "%s" of %s (owner %s, %s)' % (
             task["id"], mine, theirs, other["id"], other.get("owner"), other["status"]), hint)
     # CLAIM-CHECK-THEN-WRITE
+    worktree_lines = _wt_on_take(team_dir, task)
     stamp = now_iso()
     task["status"] = "claimed"
     task["owner"] = agent
@@ -848,6 +931,8 @@ def cmd_claim(team_dir: Path, args, agent: str) -> int:
     me["current_task"] = task["id"]
     save_agent(team_dir, me)
     print("Claimed %s. Next: team.py start %s --agent %s" % (task["id"], task["id"], agent))
+    for line in worktree_lines:
+        print(line)
     print(format_task(task, tasks_by_id))
     return 0
 
@@ -1113,6 +1198,7 @@ def cmd_done(team_dir: Path, args, agent: str) -> int:
     _, task = _owned_task(team_dir, args.task, agent)
     if task["status"] not in ("claimed", "in_progress"):
         raise _wrong_state(task, "claimed or in_progress", agent)
+    _wt_check_done(team_dir, task)
     task["updated_at"] = now_iso()
     if task.get("review_required"):
         task["status"] = "review"
@@ -1124,6 +1210,7 @@ def cmd_done(team_dir: Path, args, agent: str) -> int:
     task["status"] = "done"
     task["owner"] = None
     add_log(task, agent, "done", args.note)
+    _wt_on_finish(team_dir, task)
     save_task(team_dir, task)
     _clear_current_task(team_dir, agent, task["id"])
     print("%s is done." % task["id"])
@@ -1150,6 +1237,7 @@ def cmd_review(team_dir: Path, args, agent: str) -> int:
     add_log(task, agent, verdict, args.note or "")
     if args.approve:
         task["status"] = "done"
+        _wt_on_finish(team_dir, task)
     else:
         task["status"] = "available"
         task["claimed_at"] = None
@@ -1288,6 +1376,7 @@ def cmd_reclaim(team_dir: Path, args, agent: str) -> int:
                          task["id"], old, (owner or {}).get("last_seen") or "now",
                          load_config(team_dir)["stale_minutes"]), hint)
     # RECLAIM-CHECK-THEN-WRITE
+    worktree_lines = _wt_on_take(team_dir, task)
     print("Reclaimed from %s." % old)
     if task.get("handoff"):
         print("Previous handoff note from %s at %s:" % (task["handoff"].get("by"),
@@ -1310,6 +1399,8 @@ def cmd_reclaim(team_dir: Path, args, agent: str) -> int:
     _notify_agent(team_dir, agent, old, "%s was reclaimed from you by %s; stop working on it."
                   % (task["id"], agent), task["id"])
     print("Claimed %s. Next: team.py start %s --agent %s" % (task["id"], task["id"], agent))
+    for line in worktree_lines:
+        print(line)
     print(format_task(task, tasks_by_id))
     return 0
 
@@ -1365,6 +1456,29 @@ def cmd_leave(team_dir: Path, args, agent: str) -> int:
     me["current_task"] = None
     save_agent(team_dir, me)
     print("%s has left." % agent)
+    return 0
+
+
+def cmd_usage(team_dir: Path, args, agent: str) -> int:
+    """Record the agent's self-reported usage; no vendor quota is inspected."""
+    if args.percent is None and args.note is None:
+        raise TeamError("usage needs --percent, --note, or both")
+    record = touch_agent(team_dir, agent)
+    if agent == USER:
+        raise TeamError("usage can only be reported for a joined agent")
+    usage = dict(record.get("usage") or {})
+    if args.percent is not None:
+        usage["percent"] = args.percent
+    else:
+        usage.setdefault("percent", None)
+    if args.note is not None:
+        usage["note"] = args.note
+    else:
+        usage.setdefault("note", "")
+    usage["at"] = now_iso()
+    record["usage"] = usage
+    save_agent(team_dir, record)
+    print("Usage recorded for %s: %s%%; %s" % (agent, usage["percent"], usage["note"] or "no note"))
     return 0
 
 
@@ -1749,6 +1863,50 @@ def cmd_complete(team_dir: Path, args, agent: str | None) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Board HTML (T2)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Stall handling (T3)
+# ---------------------------------------------------------------------------
+
+
+def cmd_busy(team_dir: Path, args, agent: str) -> int:
+    raise TeamError("not implemented yet")
+
+
+# ---------------------------------------------------------------------------
+# Wait and watch (T4)
+# ---------------------------------------------------------------------------
+
+
+def cmd_wait(team_dir: Path, args, agent: str) -> int:
+    raise TeamError("not implemented yet")
+
+
+def cmd_watch(team_dir: Path, args, agent: str | None) -> int:
+    raise TeamError("not implemented yet")
+
+
+# ---------------------------------------------------------------------------
+# Task worktrees (T5)
+# ---------------------------------------------------------------------------
+
+
+def _wt_on_take(team_dir: Path, task: dict) -> list:
+    return []
+
+
+def _wt_check_done(team_dir: Path, task: dict) -> None:
+    return None
+
+
+def _wt_on_finish(team_dir: Path, task: dict) -> None:
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Argument parsing and dispatch
 # ---------------------------------------------------------------------------
 
@@ -1773,6 +1931,7 @@ def build_parser() -> Parser:
     p = sub.add_parser("join", help="register as an agent and print your ID")
     _add_agent(p, "; a new ID is generated if omitted")
     p.add_argument("--label", help="your tool name, for the board")
+    p.add_argument("--role", choices=("coordinator",), help="join with a coordinator role")
 
     p = sub.add_parser("add", help="create a task")
     _add_agent(p)
@@ -1874,6 +2033,7 @@ def build_parser() -> Parser:
     p = sub.add_parser("reclaim", help="take a task from an owner who left or is stale")
     p.add_argument("task")
     _add_agent(p)
+    p.add_argument("--release", action="store_true", help="return the task to available instead")
 
     p = sub.add_parser("files", help="register more paths on your task")
     files_sub = p.add_subparsers(dest="files_command", parser_class=Parser)
@@ -1889,6 +2049,26 @@ def build_parser() -> Parser:
 
     p = sub.add_parser("leave", help="mark yourself as left")
     _add_agent(p)
+
+    p = sub.add_parser("usage", help="record your self-reported agent usage")
+    _add_agent(p)
+    p.add_argument("--percent", type=int, choices=range(0, 101), metavar="0-100")
+    p.add_argument("--note")
+
+    p = sub.add_parser("busy", help="tell the team you are in a long step")
+    _add_agent(p)
+    p.add_argument("--minutes", type=int, required=True)
+    p.add_argument("--text", required=True)
+
+    p = sub.add_parser("wait", help="wait for new attention items or messages")
+    _add_agent(p)
+    p.add_argument("--timeout", type=float, default=1500)
+    p.add_argument("--interval", type=float, default=5)
+
+    p = sub.add_parser("watch", help="print and notify about new attention items")
+    p.add_argument("--interval", type=float, default=10)
+    p.add_argument("--once", action="store_true")
+    p.add_argument("--no-notify", action="store_true")
 
     p = sub.add_parser("skills", help="list shared skills")
     _add_agent(p)
@@ -1940,6 +2120,10 @@ COMMANDS = {
     "files": (cmd_files, True),
     "owner": (cmd_owner, False),
     "leave": (cmd_leave, True),
+    "usage": (cmd_usage, True),
+    "busy": (cmd_busy, True),
+    "wait": (cmd_wait, True),
+    "watch": (cmd_watch, False),
     "skills": (cmd_skills, False),
     "skill": (cmd_skill, True),
     "complete": (cmd_complete, False),
@@ -1950,7 +2134,8 @@ COMMANDS = {
 
 # doctor rewrites the views only with --fix-views, itself; the rest only read the board.
 NO_RENDER_COMMANDS = ("doctor", "show", "next", "owner", "stale", "skills", "complete",
-                      "check-exit")
+                      "check-exit", "wait", "watch")
+LOCK_FREE_COMMANDS = ("status", "wait", "watch")
 
 
 HELP_TEXT = """\
@@ -1963,8 +2148,12 @@ Full rules: team/PROTOCOL.md. Flags of one command: python3 team/team.py <comman
 
 Setup:
   init [--standalone]  — create or refresh team/ in this folder (exit 2 when: never)
-  join [--agent <ID>] [--label "<tool>"]  — register and print your agent ID (exit 2 when: the ID is taken)
+  join [--agent <ID>] [--label "<tool>"] [--role coordinator]  — register and print your agent ID (exit 2 when: the ID is taken)
   leave --agent <ID>  — mark yourself as left (exit 2 when: you still own a live task; hand it off first)
+  usage --agent <ID> [--percent 0-100] [--note <text>]  — report your usage (at least one flag required)
+  busy --agent <ID> --minutes <n> --text <text>  — report a long step in progress
+  wait --agent <ID> [--timeout seconds] [--interval seconds]  — wait for new attention or messages
+  watch [--interval seconds] [--once] [--no-notify]  — watch for attention items
 Tasks:
   add --agent <ID> --title --desc [--files] [--depends] [--priority] [--no-review]  — create a task (exit 2 when: unknown agent)
   next --agent <ID>  — list tasks you can claim now and tasks awaiting review (exit 2 when: unknown agent)
@@ -1990,7 +2179,7 @@ Records:
 Review & recovery:
   review <T> --agent <ID> --approve|--reject --note  — approve or reject a task in review (exit 2 when: it is yours, or not in review)
   stale [--agent <ID>]  — list stale or left agents and the live tasks they own (exit 2 when: unknown agent)
-  reclaim <T> --agent <ID>  — take a live task whose owner left or is stale (exit 2 when: the owner is active, or not live)
+  reclaim <T> --agent <ID> [--release]  — take or release a live task (exit 2 when: the owner is active, or not live)
   check-exit --agent <ID>  — check you own no live task before you stop (exit 2 when: you still own one; hand it off first)
 Skills:
   skills [--agent <ID>]  — list shared skills (exit 2 when: unknown agent)
@@ -2023,6 +2212,8 @@ def _run(argv: list) -> int:
     # Status is an observational snapshot: do not wait for or modify the writer lock, heartbeat
     # the caller, or regenerate the markdown views.
     if args.command == "status":
+        return handler(team_dir, args, agent)
+    if args.command in LOCK_FREE_COMMANDS:
         return handler(team_dir, args, agent)
     acquire_lock(team_dir, agent or "-")
     try:
