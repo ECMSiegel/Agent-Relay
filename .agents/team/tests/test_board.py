@@ -134,7 +134,21 @@ class BoardTests(LifecycleTestCase):
         html = self.board()
         self.assertRegex(html, r"\.detail-panel \{[^}]*position:fixed[^}]*right:0")
         self.assertIn("@media (max-width:800px) { .detail-panel { width:100vw; }", html)
-        self.assertIn('make("button", "close-button", "Close")', html)
+        self.assertIn('make("button", "close-button", "Close details")', html)
+        self.assertIn("body.panel-open { padding-right:", html)
+
+    def test_board_follows_the_flat_style_rules(self):
+        html = self.board()
+        css = html.split("<style>")[1].split("</style>")[0]
+        # Square corners, no gradients, one shadow (the raised details panel), tokens for type.
+        self.assertEqual(re.findall(r"border-radius:\s*([^;]+);", css), ["0"])
+        self.assertNotIn("gradient", css)
+        self.assertEqual(css.count("box-shadow:"), 1)
+        self.assertIn("--ui-font: Futura", css)
+        self.assertIn("@media (prefers-color-scheme: dark)", css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+        self.assertNotIn("transition:all", css.replace(" ", ""))
+        self.assertIn(" -- refreshes every 5 seconds", html)
         self.assertIn("function closePanel()", html)
         self.assertIn("replaceState", html)
 

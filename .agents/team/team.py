@@ -2002,49 +2002,89 @@ def render_board_html(team_dir: Path, config: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Relay board — __TITLE__</title>
 <style>
-:root { color-scheme: light dark; font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --bg:#f5f7fa; --panel:#fff; --ink:#1c2430; --muted:#5b6573; --line:#d7dde5; --accent:#3156a6; --alert:#9d2f21; --good:#226044; }
-@media (prefers-color-scheme: dark) { :root { --bg:#151a21; --panel:#202833; --ink:#edf1f5; --muted:#b1bbc8; --line:#3c4653; --accent:#a9c0ff; --alert:#ff9f91; --good:#91d6ad; } }
-* { box-sizing:border-box; }
-body { margin:0; padding:1.25rem; color:var(--ink); background:var(--bg); }
-header, section, aside { max-width:100%; }
-h1, h2, h3, p { margin-top:0; }
-.muted, .lane-meta { color:var(--muted); }
-.needs-you, .detail-panel, .done-strip { margin:1rem 0; padding:1rem; border:1px solid var(--line); border-radius:.75rem; background:var(--panel); }
-.needs-you { border-left:.35rem solid var(--alert); }
-.needs-you.empty { border-left-color:var(--good); }
-.needs-you ul, .done-list { display:flex; flex-wrap:wrap; gap:.5rem; list-style:none; padding:0; margin:0; }
-.attention-item, .done-card { padding:.45rem .65rem; border-radius:.5rem; background:var(--bg); }
-.board-scroll { overflow-x:auto; padding-bottom:.5rem; }
-.board-grid { display:grid; grid-template-columns:minmax(10rem,15rem) repeat(5,minmax(12rem,1fr)); min-width:76rem; gap:.5rem; align-items:stretch; }
-.column-heading, .lane-name, .cell { border:1px solid var(--line); border-radius:.55rem; background:var(--panel); padding:.65rem; }
-.column-heading { font-weight:700; text-transform:capitalize; }
+/* Look and rules: the portable UI style guide (flat, square, hairlines, type-led). Use the
+   tokens below; do not add literal colours, sizes or spacings. */
+:root {
+  color-scheme: light dark;
+  --paper:#ffffff; --surface:#f5f5f7; --line:#dcdde2; --text:#242428; --muted:#6c6c74;
+  --shadow:#00000018; --accent:#0069d9; --danger:#b42318;
+  --type-small:12px; --type-body:13px; --type-title:19px; --type-display:28px;
+  --ui-font: Futura, "Avenir Next", -apple-system, BlinkMacSystemFont, sans-serif;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
+  --control-height:32px; --shadow-raised:0 6px 18px var(--shadow);
+  --duration-press:80ms; --ease-out:cubic-bezier(0.2, 0, 0, 1);
+  --focus-ring:2px solid var(--accent); --focus-offset:1px;
+  --emph-bold:0 0 0.3px currentColor;
+  font-family:var(--ui-font); font-size:var(--type-body); line-height:1.45;
+  color:var(--text); background:var(--paper); font-synthesis:none;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --paper:#202023; --surface:#28282c; --line:#404046; --text:#ededf0; --muted:#a5a5af;
+          --shadow:#00000055; --accent:#64a8ff; --danger:#ff958d; }
+}
+* { box-sizing:border-box; border-radius:0; }
+body { margin:0; padding:var(--space-5); }
+h1, h2, h3, p, ul, ol, dl, dd { margin:0; padding:0; }
+ul, ol { list-style:none; }
+h1 { font-size:var(--type-display); font-weight:500; }
+h2 { font-size:var(--type-title); font-weight:500; margin-bottom:var(--space-2); }
+h3 { font-size:var(--type-body); font-weight:500; }
+.muted, .lane-meta, .status-line { color:var(--muted); font-size:var(--type-small); }
+.status-line { min-height:var(--control-height); display:flex; align-items:center; font-variant-numeric:tabular-nums; }
+.rule { height:1px; background:var(--line); margin:var(--space-4) 0; }
+.needs-you li, .done-list li { padding:var(--space-1) 0; }
+.board-scroll { overflow-x:auto; }
+/* Hairlines: the grid's own background shows through one-pixel gaps between flat cells. */
+.board-grid { display:grid; grid-template-columns:minmax(160px,220px) repeat(5,minmax(170px,1fr)); min-width:1040px; gap:1px; background:var(--line); border:1px solid var(--line); }
+.column-heading, .lane-name, .cell { background:var(--paper); padding:var(--space-3); }
+.column-heading { font-size:var(--type-small); color:var(--muted); min-height:var(--control-height); }
 .lane-name { position:sticky; left:0; z-index:1; }
-.lane-name h3 { margin:0; }
-.lane-meta { margin-top:.4rem; font-size:.83rem; }
-.usage-bar { width:100%; height:.55rem; accent-color:var(--accent); }
-.cell { min-height:5rem; }
-.task-card { display:block; width:100%; margin:0 0 .45rem; padding:.65rem; color:var(--ink); text-align:left; border:1px solid var(--line); border-radius:.5rem; background:var(--bg); cursor:pointer; }
-.task-card:hover, .task-card:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-.task-card strong, .task-card span { display:block; }
-.task-card span { margin-top:.2rem; color:var(--muted); font-size:.86rem; }
-.detail-panel { position:fixed; top:0; right:0; bottom:0; width:min(32rem,45vw); margin:0; overflow-y:auto; z-index:5; border-radius:0; box-shadow:-4px 0 14px rgba(0,0,0,.25); }
-.detail-panel .close-button { float:right; margin:0 0 .5rem .5rem; padding:.3rem .7rem; cursor:pointer; }
+.lane-meta { margin-top:var(--space-1); font-variant-numeric:tabular-nums; }
+.usage-bar { display:block; width:100%; height:2px; margin:var(--space-1) 0; border:0; appearance:none; -webkit-appearance:none; background:var(--line); color:var(--text); }
+.usage-bar::-webkit-progress-bar { background:var(--line); }
+.usage-bar::-webkit-progress-value { background:var(--text); }
+.usage-bar::-moz-progress-bar { background:var(--text); }
+.cell { min-height:64px; }
+/* Buttons are plain words: no box, no fill. */
+button { font:inherit; color:inherit; background:transparent; border:0; padding:0; text-align:left; cursor:pointer; transition:transform var(--duration-press) var(--ease-out); }
+/* The one hover and focus rule: text gets heavier without changing width. */
+button:is(:hover, :focus-visible) { text-shadow:var(--emph-bold); }
+button:focus-visible { outline:var(--focus-ring); outline-offset:var(--focus-offset); }
+button:active { transform:scale(0.99); }
+.task-card { display:block; width:100%; margin-bottom:var(--space-3); }
+.task-card span { display:block; }
+.task-card .task-title { font-weight:400; }
+.task-card .task-owner { color:var(--muted); font-size:var(--type-small); }
+/* The task whose details are open: accent plus the same heavier text. */
+.task-card[aria-current="true"] .task-title { color:var(--accent); text-shadow:var(--emph-bold); }
+.done-list { display:flex; flex-wrap:wrap; column-gap:var(--space-5); }
+.done-list .task-card { width:auto; margin-bottom:0; }
+/* The details panel is the only raised surface, so it alone has a shadow. */
+.detail-panel { position:fixed; top:0; right:0; bottom:0; width:min(360px,45vw); overflow-y:auto; z-index:5; padding:var(--space-5); background:var(--paper); border-left:1px solid var(--line); box-shadow:var(--shadow-raised); }
 .detail-panel[hidden] { display:none; }
-.detail-panel dt { margin-top:.6rem; font-weight:700; }
-.detail-panel dd { margin-left:0; white-space:pre-wrap; overflow-wrap:anywhere; }
-.detail-panel ol { padding-left:1.5rem; }
-.detail-panel li { margin:.35rem 0; }
-.stale { color:var(--alert); font-weight:700; }
+/* The panel never covers the board: the page gives up that width while it is open. */
+body.panel-open { padding-right:calc(min(360px,45vw) + var(--space-5)); }
+.detail-panel .close-button { float:right; margin-left:var(--space-3); color:var(--muted); min-height:24px; }
+.detail-panel dt { margin-top:var(--space-3); color:var(--muted); font-size:var(--type-small); }
+.detail-panel dd { white-space:pre-wrap; overflow-wrap:anywhere; }
+.detail-panel h3 { margin-top:var(--space-4); color:var(--muted); font-size:var(--type-small); font-weight:400; }
+.detail-panel li { padding:var(--space-1) 0; font-variant-numeric:tabular-nums; }
+.stale { color:var(--danger); font-weight:600; }
 @media (max-width:800px) { .detail-panel { width:100vw; } }
-@media (max-width:700px) { body { padding:.7rem; } }
+@media (max-width:800px) { body.panel-open { padding-right:var(--space-5); } }
+@media (max-width:700px) { body { padding:var(--space-3); } }
+@media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
 </style>
 </head>
 <body>
-<header><h1>Agent Relay board</h1><p id="generated" class="muted"></p></header>
+<header><h1>Agent Relay board</h1><p id="generated" class="status-line" aria-live="polite"></p></header>
+<div class="rule" role="presentation"></div>
 <section id="needs-you" class="needs-you" aria-live="polite"><h2>Needs you</h2><ul id="attention-list"></ul></section>
+<div class="rule" role="presentation"></div>
 <section aria-label="Team task lanes"><div class="board-scroll"><div id="board-grid" class="board-grid"></div></div></section>
+<div class="rule" role="presentation"></div>
 <section id="done-strip" class="done-strip"></section>
-<aside id="detail-panel" class="detail-panel" hidden aria-live="polite"></aside>
+<aside id="detail-panel" class="detail-panel" role="dialog" aria-labelledby="detail-title" hidden></aside>
 <script type="application/json" id="board-data">__DATA__</script>
 <script>
 (function () {
@@ -2075,7 +2115,8 @@ h1, h2, h3, p { margin-top:0; }
     return Math.floor(minutes / 60) + "h ago";
   }
   function statusLabel(value) {
-    return value === "in_progress" ? "in progress" : value;
+    var label = value === "in_progress" ? "in progress" : value;
+    return label.charAt(0).toUpperCase() + label.slice(1);
   }
   function taskOwner(task) {
     if (!task.owner || task.owner === "user") return task.owner || null;
@@ -2085,8 +2126,19 @@ h1, h2, h3, p { margin-top:0; }
     }))) return null;
     return owner.id;
   }
+  function markOpenCard(id) {
+    var cards = document.querySelectorAll("button.task-card");
+    for (var i = 0; i < cards.length; i += 1) {
+      if (cards[i].getAttribute("data-task") === id) cards[i].setAttribute("aria-current", "true");
+      else cards[i].removeAttribute("aria-current");
+    }
+  }
   function closePanel() {
     var panel = document.getElementById("detail-panel");
+    var opened = document.querySelector('button.task-card[aria-current="true"]');
+    markOpenCard(null);
+    document.body.classList.remove("panel-open");
+    if (opened && !panel.hidden) opened.focus();
     while (panel.firstChild) panel.removeChild(panel.firstChild);
     panel.hidden = true;
     try { sessionStorage.removeItem("agent-relay-board-open"); } catch (error) { /* no storage */ }
@@ -2100,11 +2152,15 @@ h1, h2, h3, p { margin-top:0; }
     var panel = document.getElementById("detail-panel");
     while (panel.firstChild) panel.removeChild(panel.firstChild);
     panel.hidden = false;
-    var close = make("button", "close-button", "Close");
+    var close = make("button", "close-button", "Close details");
     close.type = "button";
     close.addEventListener("click", closePanel);
     panel.appendChild(close);
-    panel.appendChild(make("h2", "", task.id + " — " + task.title));
+    var title = make("h2", "", task.id + " -- " + task.title);
+    title.id = "detail-title";
+    panel.appendChild(title);
+    markOpenCard(task.id);
+    document.body.classList.add("panel-open");
     var fields = [
       ["Status", task.status], ["Description", task.description || "(none)"],
       ["Registered paths", (task.files || []).join("\\n") || "none"],
@@ -2124,7 +2180,7 @@ h1, h2, h3, p { margin-top:0; }
     var timeline = make("ol");
     (task.log || []).forEach(function (entry) {
       var note = entry.note ? ": " + entry.note : "";
-      timeline.appendChild(make("li", "", entry.at + " — " + entry.agent + " — " + entry.event + note));
+      timeline.appendChild(make("li", "", entry.at + " -- " + entry.agent + " -- " + entry.event + note));
     });
     panel.appendChild(timeline);
     // Remembered twice: some browsers drop the URL hash when the page reloads itself.
@@ -2136,8 +2192,11 @@ h1, h2, h3, p { margin-top:0; }
   function taskCard(task, className) {
     var button = make("button", "task-card " + (className || ""));
     button.type = "button";
-    button.appendChild(make("strong", "", task.id + " · " + task.title));
-    button.appendChild(make("span", "", "Owner: " + (task.owner || "Unassigned")));
+    button.setAttribute("data-task", task.id);
+    button.appendChild(make("span", "task-title", task.id + " -- " + task.title));
+    if (task.status !== "done") {
+      button.appendChild(make("span", "task-owner", task.owner || "Unassigned"));
+    }
     button.addEventListener("click", function () { openTask(task); });
     return button;
   }
@@ -2158,7 +2217,7 @@ h1, h2, h3, p { margin-top:0; }
     document.getElementById("needs-you").classList.add("empty");
     attentionList.appendChild(make("li", "muted", "Nothing needs attention right now."));
   }
-  document.getElementById("generated").textContent = "Generated " + ageText(data.generated_at) + " · refreshes every 5 seconds";
+  document.getElementById("generated").textContent = "Generated " + ageText(data.generated_at) + " -- refreshes every 5 seconds";
 
   var visibleAgents = agents.filter(function (agent) {
     if (agent.status === "left") return false;
@@ -2173,7 +2232,7 @@ h1, h2, h3, p { margin-top:0; }
   workers.sort(function (a, b) { return a.id.localeCompare(b.id); });
   var lanes = [{id: null, label: "Unassigned", agent: null}];
   coordinators.concat(workers).forEach(function (agent) {
-    lanes.push({id: agent.id, label: agent.role === "coordinator" ? "Coordinator · " +
+    lanes.push({id: agent.id, label: agent.role === "coordinator" ? "Coordinator -- " +
       (agent.label || agent.id) : (agent.label || agent.id), agent: agent});
   });
   if (tasks.some(function (task) { return task.owner === "user"; })) {
@@ -2192,11 +2251,11 @@ h1, h2, h3, p { margin-top:0; }
       var usage = agent.usage || {};
       var usagePercent = usage.percent;
       var meta = make("div", "lane-meta");
-      if (isStale(agent)) meta.appendChild(make("div", "stale", "STALE"));
-      var usageLine = "reported by the agent: " +
+      if (isStale(agent)) meta.appendChild(make("div", "stale", "Stale"));
+      var usageLine = "Reported by the agent: " +
         (usagePercent === null || usagePercent === undefined ? "not reported" : usagePercent + "%");
-      if (usage.note) usageLine += " · " + usage.note;
-      if (usage.at) usageLine += " · " + ageText(usage.at);
+      if (usage.note) usageLine += " -- " + usage.note;
+      if (usage.at) usageLine += " -- " + ageText(usage.at);
       meta.appendChild(make("div", "", usageLine));
       if (usagePercent !== null && usagePercent !== undefined) {
         var bar = make("progress", "usage-bar");
@@ -2218,9 +2277,9 @@ h1, h2, h3, p { margin-top:0; }
           return entry.agent === agent.id && ["done", "review requested"].indexOf(entry.event) !== -1;
         }).length;
       }, 0);
-      meta.appendChild(make("div", "", "minutes on current task: " + minutes));
-      meta.appendChild(make("div", "", "tasks finished: " + finished));
-      meta.appendChild(make("div", "", "last seen: " + ageText(agent.last_seen)));
+      meta.appendChild(make("div", "", "Minutes on current task: " + minutes));
+      meta.appendChild(make("div", "", "Tasks finished: " + finished));
+      meta.appendChild(make("div", "", "Last seen: " + ageText(agent.last_seen)));
       heading.appendChild(meta);
     }
     grid.appendChild(heading);
@@ -2253,6 +2312,9 @@ h1, h2, h3, p { margin-top:0; }
     if (found) openTask(found);
   }
   window.addEventListener("hashchange", openHashTask);
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !document.getElementById("detail-panel").hidden) closePanel();
+  });
   openHashTask();
   // Reload from script, not a meta refresh: a meta refresh drops the URL hash, which closed the
   // open task panel every five seconds.
