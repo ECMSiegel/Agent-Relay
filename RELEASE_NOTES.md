@@ -1,13 +1,13 @@
 # Release notes
 
 **Version:** 0.2.0
-**Status:** Source is public on GitHub under the MIT License. No tagged release or packaged download yet.
+**Status:** Tagged `v0.2.0`. Source is public on GitHub under the MIT License.
 
-This candidate packages a small Python 3.8+ standard-library task board for coordinating coding
+This release packages a small Python 3.8+ standard-library task board for coordinating coding
 agents in one project folder. It records task ownership, reserved paths, questions, handoffs, and
 independent review without moving or rewriting the project's source files.
 
-## Candidate contents
+## Contents
 
 - `team.py` commands for setup, task lifecycle, file reservations, messages, handoffs, review,
   status, and consistency checks.
@@ -21,16 +21,17 @@ independent review without moving or rewriting the project's source files.
 - Protocol and human documentation, plus an Event Page starter fixture for a fresh setup.
 - Unit and concurrent-simulation checks.
 
-## Validation recorded locally
+## Validation
 
 - 241 unit tests passed on the development machine.
 - All 14 concurrent simulation scenarios passed on the development machine.
+- The GitHub check runs the unit suite and simulation on Python 3.8 and 3.12, and builds and smoke-tests the package on 3.12.
 - A two-agent interruption, handoff, and review trial is documented in the local work records.
 
-These results are scoped local evidence. They do not establish support on every vendor host or an
+These results do not establish support on every vendor host or an
 uncoached beginner setup experience. Those trials remain open.
 
-## Before tagging a release
+## Still open
 
-- Review and approve the final release contents and package.
-- Complete uncoached setup and any claimed vendor-host trials.
+- An uncoached beginner setup trial.
+- Trials on tools other than Claude Code, Codex and OpenCode.

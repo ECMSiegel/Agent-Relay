@@ -1,9 +1,9 @@
 # Release guide
 
 This describes the release workflow for future maintainers. The source is public on GitHub at
-`origin` and is licensed under the MIT License in the root `LICENSE` file. There is no tagged
-release or packaged download yet. MIT licensing does not by itself mean that a release has been
-approved or published.
+`origin` and is licensed under the MIT License in the root `LICENSE` file. Version 0.2.0 is tagged
+`v0.2.0` on `main`. A packaged download exists only once its GitHub Release is published; a draft
+release is not public.
 
 ## Build and inspect the candidate
 
@@ -52,12 +52,13 @@ the ignored `docs/agent-work/` directory for local review.
   prohibited a workaround.
 - **License:** MIT License, with copyright © 2026 Ethan Siegel, as stated in the root `LICENSE` file.
 - **Beginner and additional host trials:** not completed.
-- **First-commit allowlist:** all 33 explicit manifest paths exist and include these release
-  documents. They are staged locally for review; no commit is authorized.
+- **GitHub check:** the unit suite and simulation pass on Python 3.8 and 3.12; the build and smoke
+  test pass on 3.12.
+- **Manifest allowlist:** all 39 explicit manifest paths exist and are committed.
 
-## Future draft release procedure
+## Release procedure
 
-Only after the owner approves the final contents, archive, and validation:
+For each release, only after the owner approves the final contents, archive, and validation:
 
 1. Confirm the version in `release-manifest.json` and the workflow artifact name match the intended
    release version.
@@ -70,6 +71,5 @@ Only after the owner approves the final contents, archive, and validation:
 5. Create a draft release in the selected hosting service, attach the reviewed
    `dist/agent-coordination-v0.2.0.zip`, and leave it unpublished until the owner approves it.
 
-These are future steps only. The 0.2.0 work is committed locally on the branch
-`feature/board-stalls-worktrees`; it has not been pushed, tagged, or published, and no GitHub
-Release exists.
+For 0.2.0, steps 1 to 4 are done: the tag `v0.2.0` is on `main` and pushed. Step 5 leaves a draft
+GitHub Release holding the ZIP until the owner publishes it.
