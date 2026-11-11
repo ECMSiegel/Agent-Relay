@@ -2263,11 +2263,99 @@ def cmd_busy(team_dir: Path, args, agent: str) -> int:
 
 
 def cmd_wait(team_dir: Path, args, agent: str) -> int:
-    raise TeamError("not implemented yet")
+    if args.timeout < 0 or args.interval <= 0:
+        raise TeamError("timeout must be non-negative and interval must be greater than zero")
+    unknown = refuse("unknown agent; run join first (%s is not an active agent ID)" % agent,
+                     'join --label "<your tool name>"')
+    path = agent_path(team_dir, agent) if AGENT_ID_RE.match(agent or "") else None
+    if path is None or not path.is_file():
+        raise unknown
+    record = read_json(path)
+    if record.get("id") != agent or record.get("status") != "active":
+        raise unknown
+
+    # Capture a baseline before the heartbeat; waits must not hold the team lock.
+    starting_items = attention_items(team_dir, load_config(team_dir))
+    starting_keys = {item["key"] for item in starting_items}
+    starting_messages = read_jsonl(Path(team_dir) / "messages.jsonl")
+    starting_message_id = max([message.get("id", 0) for message in starting_messages] or [0])
+    if starting_items:
+        print("Already waiting:", flush=True)
+        for item in starting_items:
+            print("  %s" % item["text"], flush=True)
+
+    def heartbeat():
+        acquire_lock(team_dir, agent)
+        try:
+            touch_agent(team_dir, agent)
+        finally:
+            release_lock(team_dir)
+
+    heartbeat()
+    deadline = time.monotonic() + float(args.timeout)
+    next_heartbeat = time.monotonic() + 60.0
+    while True:
+        current_items = attention_items(team_dir, load_config(team_dir))
+        fresh = [item for item in current_items if item["key"] not in starting_keys]
+        current_record = read_json(path)
+        new_messages = [message for message in read_jsonl(Path(team_dir) / "messages.jsonl")
+                        if message.get("id", 0) > starting_message_id
+                        and message.get("to") in ("all", agent)]
+        if fresh or new_messages:
+            for item in fresh:
+                print("NEW: %s" % item["text"])
+            for message in new_messages:
+                print("NEW: Message #%s from %s: %s" % (
+                    message.get("id"), message.get("from"), message.get("text")))
+            return 0
+        now = time.monotonic()
+        if now >= deadline:
+            print("NOTHING NEW after %s s" % args.timeout)
+            return 0
+        if now >= next_heartbeat:
+            try:
+                heartbeat()
+            except TeamError as exc:
+                if exc.code != 3:
+                    raise
+            next_heartbeat = time.monotonic() + 60.0
+        time.sleep(min(float(args.interval), max(0.0, deadline - time.monotonic())))
 
 
 def cmd_watch(team_dir: Path, args, agent: str | None) -> int:
-    raise TeamError("not implemented yet")
+    if args.interval <= 0:
+        raise TeamError("interval must be greater than zero")
+    seen = set()
+    config = load_config(team_dir)
+    try:
+        while True:
+            for item in attention_items(team_dir, config):
+                if item["key"] in seen:
+                    continue
+                seen.add(item["key"])
+                print("%s %s" % (now_iso(), item["text"]), flush=True)
+                if not args.no_notify:
+                    _notify_desktop("Agent Relay: %s" % project_name(team_dir), item["text"])
+            if args.once:
+                return 0
+            time.sleep(float(args.interval))
+    except KeyboardInterrupt:
+        return 0
+
+
+def _notify_desktop(title: str, text: str) -> bool:
+    """Show a macOS notification using argv, never interpolating user text into AppleScript."""
+    import shutil
+
+    if sys.platform != "darwin" or not shutil.which("osascript"):
+        return False
+    script = 'on run argv\n display notification (item 2 of argv) with title (item 1 of argv)\nend run'
+    try:
+        subprocess.run(["osascript", "-e", script, title, text], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
