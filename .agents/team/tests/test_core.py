@@ -511,9 +511,9 @@ class TaskTests(TeamTestCase):
         self.edit_json(self.team / "agents" / "a2.json", last_seen=old.isoformat())
         out = self.ok("status", "--agent", "a1")
         self.assertIn("# Team board: Demo Project", out)
-        a2_row = [l for l in out.splitlines() if l.startswith("| a2 |")][0]
         a1_row = [l for l in out.splitlines() if l.startswith("| a1 |")][0]
-        self.assertTrue(a2_row.endswith("| STALE |"), a2_row)
+        self.assertNotIn("| a2 |", out)
+        self.assertIn("1 stale agent hidden (status --all lists them)", out)
         self.assertNotIn("STALE", a1_row)
 
     def test_views_start_with_header(self):
