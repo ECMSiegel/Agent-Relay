@@ -9,6 +9,10 @@ Board state lives in the target project's `team/` folder; no hosted service or t
 - Tracks task ownership, progress, dependencies, questions, decisions, and handoffs.
 - Reserves files against overlapping claims; task owners cannot approve their own work.
 - Includes read-only status and eight portable skills.
+- Draws the whole board as one page, `team/BOARD.html`: a lane per agent, who is stale, each agent's reported usage, and a "Needs you" strip for questions, reviews and stalled work.
+- Lets one agent join as the coordinator: it is told when something needs attention, can take a task from a stuck agent, and can wait in its chat until something happens. `watch` shows a Mac notification for you.
+
+![The Agent Relay board](docs/board.png)
 - Uses Python 3.8+ and the standard library; there is nothing to install.
 
 ## Choose a model for the job

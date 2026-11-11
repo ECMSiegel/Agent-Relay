@@ -39,7 +39,7 @@ class WaitAndWatchTests(LifecycleTestCase):
             ready = proc.stdout.readline()
             self.assertEqual(ready.strip(), "Already waiting:")
             existing = proc.stdout.readline()
-            self.assertIn("Question Q001 is open.", existing)
+            self.assertIn("Question Q001 is open: already open", existing)
             self.ok("question", "--agent", "a2", "--text", "wake up")
             before = self.view("BOARD.md")
             out, err = proc.communicate(timeout=3)
@@ -86,7 +86,37 @@ class WaitAndWatchTests(LifecycleTestCase):
         self.join("a1")
         self.ok("question", "--agent", "a1", "--text", "look here")
         out = self.ok("watch", "--once", "--no-notify")
-        self.assertIn("Question Q001 is open.", out)
+        self.assertIn("Question Q001 is open: look here", out)
+
+    def test_watch_alerts_again_when_an_item_returns(self):
+        import argparse
+        import contextlib
+        import io
+        item = {"key": "review:T001", "kind": "review", "task": "T001", "text": "T001 in review"}
+        args = argparse.Namespace(interval=1, once=False, no_notify=True)
+        buffer = io.StringIO()
+        with mock.patch.object(self.tool, "attention_items",
+                               side_effect=[[item], [item], [], [item], KeyboardInterrupt()]), \
+                mock.patch.object(self.tool.time, "sleep"), \
+                contextlib.redirect_stdout(buffer):
+            self.assertEqual(self.tool.cmd_watch(self.team, args, None), 0)
+        self.assertEqual(buffer.getvalue().count("T001 in review"), 2)
+
+    def test_wait_survives_a_busy_lock_on_the_first_heartbeat(self):
+        import argparse
+        import contextlib
+        import io
+        self.join("a1")
+        args = argparse.Namespace(timeout=0, interval=1)
+        busy = self.tool.TeamError("lock busy", 3)
+        buffer = io.StringIO()
+        with mock.patch.object(self.tool, "acquire_lock", side_effect=busy), \
+                contextlib.redirect_stdout(buffer):
+            self.assertEqual(self.tool.cmd_wait(self.team, args, "a1"), 0)
+        self.assertIn("NOTHING NEW", buffer.getvalue())
+
+    def test_shutil_is_imported_at_the_top_of_the_tool(self):
+        self.assertIs(self.tool.shutil, shutil)
 
     def test_notify_desktop_passes_title_and_text_as_arguments(self):
         with mock.patch.object(self.tool.sys, "platform", "darwin"), \

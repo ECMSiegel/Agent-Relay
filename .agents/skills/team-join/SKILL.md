@@ -31,6 +31,11 @@ file; the protocol itself is the procedure.
    for the kit path. Add `--standalone` when the kit cannot be reached from the project). Use
    `team-init` to prepare and review the project plan before anyone claims work.
 
+If you were told to join as the coordinator, run `join --role coordinator`. You are then told when
+a question, review, block or handoff needs attention; the protocol's "Coordinating a team" section
+says how to use `wait` and `reclaim`. Workers report usage with `usage` and use `busy` before a long
+step.
+
 The one thing most likely to go wrong: forgetting your agent ID. Write it down as soon as `join`
 prints it, and pass `--agent <ID>` on every command.
 

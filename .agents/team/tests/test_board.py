@@ -117,6 +117,15 @@ class BoardTests(LifecycleTestCase):
         self.assertEqual(self.ok("doctor").strip(), "OK")
 
 
+    def test_detail_panel_is_fixed_on_the_right_with_a_close_button(self):
+        html = self.board()
+        self.assertRegex(html, r"\.detail-panel \{[^}]*position:fixed[^}]*right:0")
+        self.assertIn("@media (max-width:800px) { .detail-panel { width:100vw; }", html)
+        self.assertIn('make("button", "close-button", "Close")', html)
+        self.assertIn("function closePanel()", html)
+        self.assertIn("replaceState", html)
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

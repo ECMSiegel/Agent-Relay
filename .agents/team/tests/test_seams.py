@@ -88,6 +88,31 @@ class SeamTests(LifecycleTestCase):
         self.assertEqual(observed, {"question", "review", "stale_owner", "answered",
                                     "usage_high", "idle", "complete"})
 
+    def test_attention_texts_carry_task_and_title(self):
+        self.join("a1", "a2")
+        config = self.tool.load_config(self.team)
+        task = self.to_in_progress("a1")
+        self.ok("question", "--agent", "a2", "--task", task, "--text", "x" * 100)
+        self.ok("done", task, "--agent", "a1", "--note", "ready")
+        second = self.add("Second piece")
+        self.ok("claim", second, "--agent", "a2")
+        self.set_last_seen("a2", 31)
+        texts = {item["kind"]: item["text"]
+                 for item in self.tool.attention_items(self.team, config)}
+        self.assertEqual(texts["question"], "Question Q001 (%s) is open: %s..." % (task, "x" * 80))
+        self.assertEqual(texts["review"], "Task %s (Work) is awaiting review." % task)
+        self.assertEqual(texts["stale_owner"],
+                         "Task %s (Second piece) has stale or left owner a2." % second)
+
+    def test_usage_percent_out_of_range_is_a_short_error(self):
+        self.join("a1")
+        for bad in ("101", "-1"):
+            code, out, err = self.main("usage", "--agent", "a1", "--percent", bad)
+            self.assertEqual(code, 1, err)
+            self.assertIn("0 to 100", err)
+            self.assertLess(len(err), 200)
+        self.ok("usage", "--agent", "a1", "--percent", "100")
+
     def test_wait_and_watch_dispatch_without_lock_or_view_render(self):
         self.join("a1")
         before = self.view("BOARD.md")

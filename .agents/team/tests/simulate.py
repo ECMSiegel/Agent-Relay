@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -568,6 +569,76 @@ def scenario_10(ctx):
     return log.done()
 
 
+def scenario_11(ctx):
+    log = Log()
+    project = ctx["project"]
+    ids = {}
+    for name, extra in (("coordinator", ("--role", "coordinator")), ("worker", ()),
+                        ("third agent", ())):
+        code, out, _ = log.step(project, "join", "--label", name, *extra)
+        ids[name] = agent_id_from(out)
+        log.check(code == 0 and ids[name], "%s joins" % name)
+    coord, worker, third = ids["coordinator"], ids["worker"], ids["third agent"]
+    code, out, _ = log.step(project, "add", "--agent", "user", "--title", "Override target",
+                            "--desc", "Owned by a live worker", "--files", "src/k.py", "--no-review")
+    task = out.strip().splitlines()[-1]
+    log.step(project, "claim", task, "--agent", worker)
+    log.step(project, "start", task, "--agent", worker)
+    code, _, _ = log.step(project, "reclaim", task, "--agent", third)
+    log.check(code == 2, "a plain agent cannot take a task from a live owner (exit 2)")
+    code, out, _ = log.step(project, "reclaim", task, "--agent", coord)
+    log.check(code == 0 and "Reclaimed from %s" % worker in out,
+              "the coordinator takes the task from the live owner")
+    code, out, _ = log.step(project, "show", task, "--full")
+    log.check("override" in out, "the log records the override")
+    code, out, _ = log.step(project, "add", "--agent", "user", "--title", "Release target",
+                            "--desc", "Also owned by a live worker", "--files", "src/m.py",
+                            "--no-review")
+    task = out.strip().splitlines()[-1]
+    log.step(project, "claim", task, "--agent", worker)
+    log.step(project, "start", task, "--agent", worker)
+    code, out, _ = log.step(project, "reclaim", task, "--agent", coord, "--release")
+    log.check(code == 0 and "available again" in out,
+              "reclaim --release takes it from the live owner and returns it to available")
+    code, out, _ = log.step(project, "claim", task, "--agent", third, grep=("uncommitted",))
+    log.check(code == 0 and "Released from" in out and "uncommitted edits" in out,
+              "a third agent claims it and sees the release note")
+    return log.done()
+
+
+def scenario_12(ctx):
+    log = Log()
+    project = ctx["project"]
+    code, out, _ = log.step(project, "join", "--label", "waiting coordinator", "--role", "coordinator")
+    waiter = agent_id_from(out)
+    code, out, _ = log.step(project, "join", "--label", "asker")
+    asker = agent_id_from(out)
+    log.check(waiter and asker, "a coordinator and an asking agent join")
+    proc = subprocess.Popen([sys.executable, "team/team.py", "wait", "--agent", waiter,
+                             "--timeout", "30", "--interval", "0.2"], cwd=str(project),
+                            env=clean_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            universal_newlines=True)
+    try:
+        # Wait for the first heartbeat (the baseline is taken before it), so the question below
+        # is new, not part of what was already waiting.
+        time.sleep(2)
+        log.check(proc.poll() is None, "wait is running in the background")
+        log.step(project, "question", "--agent", asker, "--text", "Which colour should the banner be?")
+        out, err = proc.communicate(timeout=30)
+    except Exception:
+        proc.kill()
+        proc.communicate()
+        raise
+    log.lines.append("$ python3 team/team.py wait --agent %s   (background)" % waiter)
+    for line in [l for l in out.splitlines() if l.strip()][:MAX_OUT_LINES]:
+        log.lines.append("    " + line)
+    log.lines.append("    [exit %d]" % proc.returncode)
+    log.check(proc.returncode == 0 and "NEW:" in out and "banner" in out,
+              "wait returns NEW: naming the question another process opened")
+    log.check(not leftover_locks(project), "wait leaves no lock behind")
+    return log.done()
+
+
 SCENARIOS = [
     ("Scenario 0 - lock fail-first proof (doctored tool must double-claim, real tool must not)", scenario_0),
     ("Scenario 1 - four agents join at once", scenario_1),
@@ -580,6 +651,8 @@ SCENARIOS = [
     ("Scenario 8 - stale owner recovered with reclaim", scenario_8),
     ("Scenario 9 - do not touch another agent's active files", scenario_9),
     ("Scenario 10 - review gate and project completion", scenario_10),
+    ("Scenario 11 - coordinator overrides a live owner, then releases the task", scenario_11),
+    ("Scenario 12 - wait returns when another process opens a question", scenario_12),
 ]
 
 
@@ -606,7 +679,7 @@ def main(argv=None):
 def _simulate(args, started, ctx, tmp_roots):
     sections = []
 
-    # Shared workspace for scenarios 1-10: init, plan, five tasks added by the user.
+    # Shared workspace for scenarios 1-12: init, plan, five tasks added by the user.
     workspace, project = build_workspace("team-sim-main-")
     tmp_roots.append(workspace.parent)
     ctx["project"] = project

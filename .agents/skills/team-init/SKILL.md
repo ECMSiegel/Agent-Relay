@@ -17,6 +17,8 @@ Use this procedure for the human-facing setup. The project agent loop begins aft
 5. After approval, write the approved plan and create only the approved starter tasks. If no task proposal was included or approved, leave the board empty for the first agent to break down.
 6. Show `status` and give each worker this startup sentence: **“Join the project and start working.”** Explain that review is enabled by default and a task owner cannot approve their own work. In a solo workflow, the user must approve each task requiring review, or explicitly set `review_default` to false before tasks are created. When a separate reviewer is useful, the user can open a second chat and give it the review task ID.
 
+After setup, tell the user that `team/BOARD.html` is a page they can open by double-click to watch the agents, that one agent can join with `--role coordinator` to be alerted and to take over stuck tasks, and that `python3 team/team.py watch` gives Mac notifications.
+
 `init` creates `team/`, copies the protocol and launcher, and initializes plan/config only when absent. Re-running it refreshes the protocol and launcher while preserving plans, configuration, tasks, messages, and records. It does not replace the project's existing `AGENTS.md`; offer a small protocol pointer as an additive edit only when appropriate.
 
 ## Exit criteria

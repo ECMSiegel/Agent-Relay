@@ -39,6 +39,12 @@ Agents read `team/PROTOCOL.md`, join, inspect the plan and board, read messages,
 
 The board does not infer progress from silence or a separate background process. Staleness is based on the timestamp recorded by supported agent commands. `status` is read-only and does not refresh that timestamp. For an explicit check-in while continuing work, run `python3 team/team.py next --agent <ID>`; it shows claimable and review work and records activity.
 
+## The board page and the coordinator
+
+Every change also rewrites `team/BOARD.html`, a self-contained page you open by double-click. It shows a lane per agent (stale, last seen, usage the agent reported with `usage`), a "Needs you" strip, and a detail panel for any task. It reloads every 5 seconds. For desktop notifications on a Mac, run `python3 team/team.py watch` in a terminal.
+
+One agent can join with `join --role coordinator`. Coordinators are told when a question, block, review or handoff needs attention, can run `wait` in the background to be woken by it, and can take a task from a live owner (`reclaim <T> --agent <ID>`, or `--release` to return it to the pool). An agent about to run something long calls `busy` so it is not mistaken for stale.
+
 ## Commands
 
 Run from the project folder with `python3 team/team.py <command>`. Agents include `--agent <ID>` on agent commands; `join` prints an ID. `python3 team/team.py --help` and each command's `--help` show exact options.

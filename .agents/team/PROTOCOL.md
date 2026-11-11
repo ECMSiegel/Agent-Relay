@@ -21,8 +21,14 @@ Words used below:
 - **Owner**: the agent that currently holds a task.
 - **Stale agent**: an agent that has not run an activity-recording command with its agent ID for `stale_minutes`
   (30 by default, set in `team/config.json`). Its tasks can be taken over by other agents.
+- **Coordinator**: an agent that joined with `join --role coordinator`. It watches the board, is
+  told when a question, review, block, or handoff needs attention, and may take any task over from
+  a live owner. Workers are every other agent.
+- **Busy**: a short promise that you are in a long step. `busy` keeps you from being called stale
+  until the time you gave is up (see "Staying current").
 - **The user**: the human. The user runs commands with the literal agent ID `user`.
-- **Views**: `team/BOARD.md`, `team/MESSAGES.md`, `team/DECISIONS.md`, `team/DISCOVERIES.md`, and
+- **Views**: `team/BOARD.md`, `team/BOARD.html` (a picture of the same board for a person, see
+  "Coordinating a team"), `team/MESSAGES.md`, `team/DECISIONS.md`, `team/DISCOVERIES.md`, and
   `team/QUESTIONS.md`. The tool rewrites them after every change (read-only commands such as `show`
   and `owner` leave them alone); they are for reading only.
 
@@ -73,7 +79,8 @@ changes are serialized by a lock. `status` is a read-only snapshot and does not 
 `status` is read-only: it does not acquire the lock, rewrite views, or update an agent's activity
 timestamp. Supported work commands record activity. For an explicit check-in without changing task
 state, run `python3 team/team.py next --agent <ID>`; it shows claimable and review work and records
-activity. Do not invent a separate heartbeat command.
+activity. Before a long step with no commands in it, use `busy` (see "Staying current"). Do not
+invent any other heartbeat command.
 
 ## The loop
 
@@ -104,8 +111,9 @@ names; do not work around it.
    to 11, then go to step 12. If `next` lists nothing you can claim, go through these in order and
    stop at the first that applies:
    1. it lists tasks in `review` that you do not own: review one, then go to step 12;
-   2. run `python3 team/team.py stale`; if a stale or left agent owns a live task, take it with
-      `reclaim` (see "Stale agents") and continue at step 7;
+   2. `next` also ends with a list "Tasks you can take over (owner stale or left)", each with a
+      ready `reclaim` command; if it lists one, take it with `reclaim` (see "Stale agents") and
+      continue at step 7 (`python3 team/team.py stale` shows the same owners);
    3. run `python3 team/team.py complete`; if it prints `COMPLETE`, tell the user the project is
       finished and run `leave`;
    4. otherwise nothing is available to you. Run `question` only if something blocks the whole
@@ -137,7 +145,8 @@ names; do not work around it.
     `python3 team/team.py msg --agent <ID> --to <their ID> ...` or `--to all`.
 11. Finish it: `python3 team/team.py done <T> --agent <ID> --note "what changed and how it was
     verified"`. A task that requires review goes to `review`; otherwise it goes to `done`.
-12. Go back to step 3.
+12. If your tool shows how much of your usage or context is used, report it:
+    `python3 team/team.py usage --agent <ID> --percent <n> --note "..."`. Then go back to step 3.
 13. Before you stop for any reason, run
     `python3 team/team.py handoff <T> --agent <ID> --note "..."` for every live task you own
     (`claimed`, `in_progress`, or `blocked`). End each note with one line per registered path, in
@@ -165,6 +174,10 @@ have to stop), stop starting new work and do this at once:
 2. Run `python3 team/team.py check-exit --agent <ID>`. It prints `OK to leave` when you own no live
    task; otherwise it exits with code 2 and names the tasks you still have to hand off.
 3. Run `python3 team/team.py leave --agent <ID>`.
+
+If your tool shows how much usage or context is left, report it first with
+`python3 team/team.py usage --agent <ID> --percent <n> --note "..."` so the person watching the
+board can see why you stopped. Always report it before a handoff.
 
 Each task goes back to `available` with your note attached, and the next agent that claims it sees
 the note. This per-task handoff is separate from a project-wide `HANDOFF.md` file that some
@@ -196,7 +209,7 @@ Files:
 - Register exact files or the narrowest necessary directories. Do not use wildcard paths for new
   reservations; broad and pattern-based claims are hard to audit, even if overlap checking
   understands them.
-- Never edit the view files (`BOARD.md`, `MESSAGES.md`, `DECISIONS.md`, `DISCOVERIES.md`,
+- Never edit the view files (`BOARD.md`, `BOARD.html`, `MESSAGES.md`, `DECISIONS.md`, `DISCOVERIES.md`,
   `QUESTIONS.md`) or the files under `team/tasks/`, `team/agents/`, `team/questions/`, or the
   `.jsonl` logs. Only the tool writes them.
 
@@ -230,10 +243,13 @@ Staying current:
 - Staleness is based on the last activity-recording command. `status` is read-only and never counts
   as a check-in, even with `--agent`. While working, use the supported check-in when needed:
   `python3 team/team.py next --agent <ID>`. It displays available/review work and records activity.
-- Before a step that may take longer than 10 minutes (a long build or test run), tell the others
-  and state how long you expect it to take:
-  `python3 team/team.py msg --agent <ID> --to all --kind info --text "T004: running the full
-  build, expected to take about 25 minutes"`.
+- Before a step that may take longer than 10 minutes (a long build or test run), run
+  `python3 team/team.py busy --agent <ID> --minutes <N> --text "T004: running the full build"`.
+  It tells everyone and stops you from being called stale until those minutes pass (at most
+  `busy_max_minutes` in `team/config.json`, 120 by default). Run any command, such as `next`, when
+  the step ends. A coordinator or the user can still take your task at once.
+- Report your usage with `usage --agent <ID> --percent <n> --note "..."` whenever your tool shows
+  it. The figure is self-reported; the board shows "not reported" until you do.
 
 Skills (shared procedures):
 - Before starting work, run `python3 team/team.py skills` and use any skill that fits the task. It
@@ -247,6 +263,12 @@ Skills (shared procedures):
 Talking to the user:
 - To reach the user, run `question`. Do not use `msg` for the user; the user reads
   `team/QUESTIONS.md`, not an inbox (`msg --to user` is refused).
+- To reach the coordinator, run `msg --to coordinator ...`; every active coordinator gets it. With
+  no coordinator it is refused, and you use `question` instead.
+- Coordinators are told automatically when anyone opens a question, blocks, proposes a plan change,
+  sends a task to review, or hands off or releases a task. You do not need to message them about
+  those. After any command, up to three unread direct messages are printed in full under the
+  unread line.
 - The user answers with `python3 team/team.py resolve <Q> --agent user --text "..."`. The view
   files are regenerated after every command and are never edited by hand, so an answer typed into
   `QUESTIONS.md` is lost.
@@ -262,10 +284,15 @@ Commits:
 
 - `python3 team/team.py stale` lists agents that have not run a command for `stale_minutes`, and
   the live tasks they still own.
-- Before you `reclaim`, read that owner's recent messages in `team/MESSAGES.md`. If they announced
-  a long step and its stated duration has not yet passed, do not reclaim; choose other work.
+- An owner who ran `busy` is not stale until its time is up, so `stale`, `next`, and `reclaim` do
+  not offer its task. You no longer need to read messages to find out.
 - `python3 team/team.py reclaim <T> --agent <ID>` is the only way to take a task that another
-  agent owns. It works only if that owner has left or is stale; otherwise it is refused.
+  agent owns. For an ordinary agent it works only if that owner has left or is stale; otherwise it
+  is refused. A coordinator or the user may take a task from an active owner at any time (the
+  log says "override"). The old owner is told.
+- `python3 team/team.py reclaim <T> --agent <ID> --release` does not take the task: it returns it to
+  `available` with no owner and a note warning of uncommitted edits. Anyone may do it for a stale or
+  left owner; a coordinator or the user may do it always.
 - `reclaim` prints the previous owner's handoff note (if any) and the last 10 log entries of the
   task. Read them, and look at the current state of the task's registered paths, before
   continuing. Do not redo work the log says is finished.
@@ -310,6 +337,15 @@ Choose any coding tool or model that can read the project and run its commands.
   verification command. Ask it to follow this protocol.
 - Start a separate reviewer chat for tasks in `review`, or review them yourself. The owner cannot
   approve its own task.
+- Join with `join --role coordinator`. Workers never wait: they run the loop and hand off. The
+  coordinator can sit in its chat and run `python3 team/team.py wait --agent <ID>` in the
+  background; it prints what is already waiting, then returns with lines starting `NEW:` when a
+  question, review, stale owner, high usage report, or direct message appears (or `NOTHING NEW`
+  after `--timeout` seconds, 1500 by default).
+- For the person, `team/BOARD.html` is a picture of the board: one lane per agent, a "Needs you"
+  strip, each agent's reported usage, and a detail panel for any task. Double-click it to open it in
+  a browser; it reloads itself every 5 seconds and shows STALE without any command being run. To
+  get a desktop notification on a Mac, run `python3 team/team.py watch` in a terminal.
 - Use `status` to inspect progress. If a worker needs an explicit activity check-in, it can run
   `next --agent <ID>`; there is no automatic monitor or scheduler.
 - At a natural stopping point, have the worker hand off unfinished work and open another chat only
@@ -345,7 +381,8 @@ Setup and identity:
   the launcher, never overwrites `PLAN.md`, `config.json`, or state; `--standalone` copies the whole
   tool for projects outside a workspace. Exit 2: never. Exit 1 if the new launcher cannot reach the
   tool (then use `--standalone`).
-- `join [--agent <ID>] [--label "<text>"]` — register as a new agent and print your ID. A new agent
+- `join [--agent <ID>] [--label "<text>"] [--role coordinator]` — register as a new agent and print
+  your ID. `--role coordinator` makes you a coordinator. A new agent
   starts with an empty inbox (messages sent before it joined are in `team/MESSAGES.md`). Exit 2: the
   requested ID belongs to an active agent.
 - `leave --agent <ID>` — mark yourself as left. Exit 2: you still own a claimed, in-progress, or
@@ -389,9 +426,11 @@ Tasks:
   owner, or the task is not in a state that allows this.
 - `stale [--agent <ID>]` — list stale or left agents and the live tasks they own. Exit 2: only the
   unknown-agent rule.
-- `reclaim <T> --agent <ID>` — take over a task whose owner has left or is stale; prints the old
-  handoff and the last 10 log entries. Exit 2: the owner is still active and not stale, or the task
-  is not in a state that allows this. An unknown task ID is exit 1.
+- `reclaim <T> --agent <ID> [--release]` — take over a task whose owner has left or is stale (a
+  coordinator or `user` may take it from an active owner); prints the old handoff and the last 10
+  log entries. With `--release` the task returns to `available` instead, with no owner. Exit 2: the
+  owner is still active and not stale and you are not a coordinator or `user`, or the task is not in
+  a state that allows this. An unknown task ID is exit 1.
 - `complete [--agent <ID>]` — print `COMPLETE` when the project is finished (see "Project
   finished"). Exit 2: the project is not finished (the output says what remains), or the unknown-agent
   rule.
@@ -410,9 +449,22 @@ Tasks:
   given, which rewrites the views. Exit 2: at least one problem was found, or the unknown-agent
   rule.
 
+Usage, waiting and watching:
+- `usage --agent <ID> [--percent 0-100] [--note "<text>"]` — record your self-reported usage; shown
+  on the board, and 80 percent or more (`usage_warn_percent`) is listed as needing attention. Exit 1:
+  neither flag given, or the percent is outside 0 to 100.
+- `busy --agent <ID> --minutes <N> --text "<text>"` — say you are in a long step; you are not
+  called stale for N minutes and everyone is told. Exit 1: N is below 1 or above `busy_max_minutes`.
+- `wait --agent <ID> [--timeout <seconds>] [--interval <seconds>]` — block until something new
+  needs attention or a message arrives for you or all, then print it as `NEW: ...` and exit 0; after
+  the timeout print `NOTHING NEW`. For coordinators. It never takes the lock except a brief
+  check-in. Exit 2: the unknown-agent rule.
+- `watch [--interval <seconds>] [--once] [--no-notify]` — print each new thing that needs attention
+  and show a macOS notification. For a person, in a terminal; stop with Ctrl-C. Needs no agent ID.
+
 Messages and records:
-- `msg --agent <ID> --to all|<agent ID> --kind finding|question|warning|request|handoff|review|info
-  --text "<text>" [--task <T>]` — send a message to one agent or to all. Exit 2: `--to user`
+- `msg --agent <ID> --to all|coordinator|<agent ID> --kind finding|question|warning|request|handoff|review|info
+  --text "<text>" [--task <T>]` — send a message to one agent, to `coordinator`, or to all. Exit 2: `--to user`
   (use `question` instead), or `--to` names an unknown agent.
 - `inbox --agent <ID> [--peek]` — print your new messages, oldest first, and mark them read
   (`--peek` leaves them unread). Exit 2: only the unknown-agent rule.

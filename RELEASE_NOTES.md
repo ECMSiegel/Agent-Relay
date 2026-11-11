@@ -11,6 +11,10 @@ independent review without moving or rewriting the project's source files.
 
 - `team.py` commands for setup, task lifecycle, file reservations, messages, handoffs, review,
   status, and consistency checks.
+- A generated `team/BOARD.html` page with agent lanes, usage, stale flags and a "Needs you" strip.
+- A coordinator role (`join --role coordinator`), `msg --to coordinator`, automatic coordinator
+  alerts, `reclaim` override and `--release`, and `busy` so long steps are not called stale.
+- `usage` (self-reported), `wait` (for coordinators) and `watch` (Mac notifications) commands.
 - Eight portable team skills for setup, joining, task creation, handoff, review, status, answers,
   and board diagnosis.
 - Protocol and human documentation, plus an Event Page starter fixture for a fresh setup.
@@ -18,8 +22,8 @@ independent review without moving or rewriting the project's source files.
 
 ## Validation recorded locally
 
-- 184 unit tests passed on the development machine.
-- All 11 concurrent simulation scenarios passed on the development machine.
+- 221 unit tests passed on the development machine.
+- All 13 concurrent simulation scenarios passed on the development machine.
 - A two-agent interruption, handoff, and review trial is documented in the local work records.
 
 These results are scoped local evidence. They do not establish support on every vendor host or an

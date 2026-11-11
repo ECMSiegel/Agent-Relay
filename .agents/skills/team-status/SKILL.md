@@ -35,6 +35,8 @@ views. If a writer lock overlaps the read, the output warns that the snapshot ma
      check; report unknown if the raw files do not establish it.
    - Verification limits stated in task records or messages: separate reported checks from checks
      independently observed, and do not treat a review state as user confirmation.
+   If `team/BOARD.html` exists, tell the user they can open it in a browser for the same picture
+   (lanes, reported usage, "Needs you"); agents that reported high usage are worth naming.
 4. End with the next action for the user, if any, and the skill that does it:
    `team-answer` for questions and proposals, `team-review` for tasks in review, `team-doctor`
    if the board looks inconsistent, `team-task` to add work. If nothing is needed, say so.

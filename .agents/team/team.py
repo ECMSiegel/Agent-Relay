@@ -17,6 +17,7 @@ import json
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -435,8 +436,13 @@ def attention_items(team_dir: Path, config: dict) -> list:
     for question in questions:
         if question.get("status") == "open":
             qid = question["id"]
+            asked = " ".join(str(question.get("text", "")).split())
+            if len(asked) > 80:
+                asked = asked[:80].rstrip() + "..."
+            about = " (%s)" % question["task"] if question.get("task") else ""
             items.append({"key": "question:%s" % qid, "kind": "question",
-                          "task": question.get("task"), "text": "Question %s is open." % qid})
+                          "task": question.get("task"),
+                          "text": "Question %s%s is open: %s" % (qid, about, asked)})
 
     tasks = load_tasks(team_dir)
     agents = {agent["id"]: agent for agent in load_agents(team_dir)}
@@ -445,7 +451,7 @@ def attention_items(team_dir: Path, config: dict) -> list:
         if task.get("status") == "review":
             tid = task["id"]
             items.append({"key": "review:%s" % tid, "kind": "review", "task": tid,
-                          "text": "Task %s is awaiting review." % tid})
+                          "text": "Task %s (%s) is awaiting review." % (tid, task.get("title", ""))})
 
     for task in tasks:
         owner = task.get("owner")
@@ -456,7 +462,8 @@ def attention_items(team_dir: Path, config: dict) -> list:
                 owner_record, config["stale_minutes"]):
             tid = task["id"]
             items.append({"key": "stale_owner:%s:%s" % (tid, owner), "kind": "stale_owner",
-                          "task": tid, "text": "Task %s has stale or left owner %s." % (tid, owner)})
+                          "task": tid, "text": "Task %s (%s) has stale or left owner %s." % (
+                              tid, task.get("title", ""), owner)})
 
     for task in tasks:
         if task.get("status") != "blocked":
@@ -1552,6 +1559,8 @@ def cmd_usage(team_dir: Path, args, agent: str) -> int:
     """Record the agent's self-reported usage; no vendor quota is inspected."""
     if args.percent is None and args.note is None:
         raise TeamError("usage needs --percent, --note, or both")
+    if args.percent is not None and not 0 <= args.percent <= 100:
+        raise TeamError("--percent must be a number from 0 to 100")
     record = touch_agent(team_dir, agent)
     if agent == USER:
         raise TeamError("usage can only be reported for a joined agent")
@@ -2008,13 +2017,15 @@ h1, h2, h3, p { margin-top:0; }
 .task-card:hover, .task-card:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .task-card strong, .task-card span { display:block; }
 .task-card span { margin-top:.2rem; color:var(--muted); font-size:.86rem; }
-.detail-panel { max-width:60rem; }
+.detail-panel { position:fixed; top:0; right:0; bottom:0; width:min(32rem,45vw); margin:0; overflow-y:auto; z-index:5; border-radius:0; box-shadow:-4px 0 14px rgba(0,0,0,.25); }
+.detail-panel .close-button { float:right; margin:0 0 .5rem .5rem; padding:.3rem .7rem; cursor:pointer; }
 .detail-panel[hidden] { display:none; }
 .detail-panel dt { margin-top:.6rem; font-weight:700; }
 .detail-panel dd { margin-left:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .detail-panel ol { padding-left:1.5rem; }
 .detail-panel li { margin:.35rem 0; }
 .stale { color:var(--alert); font-weight:700; }
+@media (max-width:800px) { .detail-panel { width:100vw; } }
 @media (max-width:700px) { body { padding:.7rem; } }
 </style>
 </head>
@@ -2064,10 +2075,24 @@ h1, h2, h3, p { margin-top:0; }
     }))) return null;
     return owner.id;
   }
+  function closePanel() {
+    var panel = document.getElementById("detail-panel");
+    while (panel.firstChild) panel.removeChild(panel.firstChild);
+    panel.hidden = true;
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    } else {
+      window.location.hash = "";
+    }
+  }
   function openTask(task) {
     var panel = document.getElementById("detail-panel");
     while (panel.firstChild) panel.removeChild(panel.firstChild);
     panel.hidden = false;
+    var close = make("button", "close-button", "Close");
+    close.type = "button";
+    close.addEventListener("click", closePanel);
+    panel.appendChild(close);
     panel.appendChild(make("h2", "", task.id + " — " + task.title));
     var fields = [
       ["Status", task.status], ["Description", task.description || "(none)"],
@@ -2291,13 +2316,16 @@ def cmd_wait(team_dir: Path, args, agent: str) -> int:
         finally:
             release_lock(team_dir)
 
-    heartbeat()
+    try:
+        heartbeat()
+    except TeamError as exc:
+        if exc.code != 3:
+            raise
     deadline = time.monotonic() + float(args.timeout)
     next_heartbeat = time.monotonic() + 60.0
     while True:
         current_items = attention_items(team_dir, load_config(team_dir))
         fresh = [item for item in current_items if item["key"] not in starting_keys]
-        current_record = read_json(path)
         new_messages = [message for message in read_jsonl(Path(team_dir) / "messages.jsonl")
                         if message.get("id", 0) > starting_message_id
                         and message.get("to") in ("all", agent)]
@@ -2329,7 +2357,9 @@ def cmd_watch(team_dir: Path, args, agent: str | None) -> int:
     config = load_config(team_dir)
     try:
         while True:
-            for item in attention_items(team_dir, config):
+            items = attention_items(team_dir, config)
+            seen &= {item["key"] for item in items}
+            for item in items:
                 if item["key"] in seen:
                     continue
                 seen.add(item["key"])
@@ -2345,8 +2375,6 @@ def cmd_watch(team_dir: Path, args, agent: str | None) -> int:
 
 def _notify_desktop(title: str, text: str) -> bool:
     """Show a macOS notification using argv, never interpolating user text into AppleScript."""
-    import shutil
-
     if sys.platform != "darwin" or not shutil.which("osascript"):
         return False
     script = 'on run argv\n display notification (item 2 of argv) with title (item 1 of argv)\nend run'
@@ -2521,7 +2549,7 @@ def build_parser() -> Parser:
 
     p = sub.add_parser("usage", help="record your self-reported agent usage")
     _add_agent(p)
-    p.add_argument("--percent", type=int, choices=range(0, 101), metavar="0-100")
+    p.add_argument("--percent", type=int, metavar="0-100")
     p.add_argument("--note")
 
     p = sub.add_parser("busy", help="tell the team you are in a long step")
