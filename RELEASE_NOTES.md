@@ -1,7 +1,7 @@
-# Release notes (draft)
+# Release notes
 
-**Version:** 0.1.0 draft
-**Status:** Local release candidate; not approved for public distribution. The project is licensed under the MIT License.
+**Version:** 0.2.0
+**Status:** Source is public on GitHub under the MIT License. No tagged release or packaged download yet.
 
 This candidate packages a small Python 3.8+ standard-library task board for coordinating coding
 agents in one project folder. It records task ownership, reserved paths, questions, handoffs, and
@@ -25,7 +25,7 @@ independent review without moving or rewriting the project's source files.
 These results are scoped local evidence. They do not establish support on every vendor host or an
 uncoached beginner setup experience. Those trials remain open.
 
-## Before any public distribution
+## Before tagging a release
 
 - Review and approve the final release contents and package.
 - Complete uncoached setup and any claimed vendor-host trials.
