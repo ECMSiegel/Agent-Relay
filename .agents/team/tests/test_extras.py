@@ -25,7 +25,9 @@ class UnreadLineTests(LifecycleTestCase):
         task_id = self.add()
         self.ok("msg", "--agent", "a2", "--to", "a1", "--kind", "info", "--text", "hello")
         out = self.ok("show", task_id, "--agent", "a1")
-        self.assertEqual(out.rstrip("\n").splitlines()[-1], self.line("a1"))
+        lines = out.rstrip("\n").splitlines()
+        self.assertEqual(lines[-2], self.line("a1"))
+        self.assertIn("from a2 [info]: hello", lines[-1])  # the direct-message preview follows
         inbox = self.ok("inbox", "--agent", "a1")
         self.assertIn("hello", inbox)
         self.assertNotIn("unread message(s)", inbox)  # inbox itself prints no reminder
@@ -39,7 +41,9 @@ class UnreadLineTests(LifecycleTestCase):
         self.ok("msg", "--agent", "a2", "--to", "a2", "--kind", "info", "--text", "not for a1")
         self.ok("inbox", "--agent", "a1", "--peek")
         out = self.ok("next", "--agent", "a1")
-        self.assertEqual(out.rstrip("\n").splitlines()[-1], self.line("a1", 2))
+        lines = out.rstrip("\n").splitlines()
+        self.assertEqual(lines[-2], self.line("a1", 2))
+        self.assertIn("from a2 [info]: two", lines[-1])  # the direct-message preview follows
 
     def test_no_line_for_user_join_or_when_nothing_is_unread(self):
         self.join("a1")
@@ -55,7 +59,9 @@ class UnreadLineTests(LifecycleTestCase):
         self.ok("msg", "--agent", "a2", "--to", "a1", "--kind", "info", "--text", "hello")
         code, out, _ = self.main("complete", "--agent", "a1")  # exit 2: not finished
         self.assertEqual(code, 2)
-        self.assertEqual(out.rstrip("\n").splitlines()[-1], self.line("a1"))
+        lines = out.rstrip("\n").splitlines()
+        self.assertEqual(lines[-2], self.line("a1"))
+        self.assertIn("from a2 [info]: hello", lines[-1])  # the direct-message preview follows
         self.assertIn("NOT COMPLETE", out)
 
 
