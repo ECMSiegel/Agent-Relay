@@ -89,12 +89,13 @@ class SeamTests(LifecycleTestCase):
                                     "usage_high", "idle", "complete"})
 
     def test_wait_and_watch_dispatch_without_lock_or_view_render(self):
+        self.join("a1")
         before = self.view("BOARD.md")
-        for argv in (("wait", "--agent", "user"), ("watch", "--once")):
+        for argv in (("wait", "--agent", "a1", "--timeout", "0", "--interval", "0.01"),
+                     ("watch", "--once", "--no-notify")):
             with self.subTest(argv=argv):
                 code, _, err = self.main(*argv)
-                self.assertEqual(code, 1)
-                self.assertIn("not implemented yet", err)
+                self.assertEqual(code, 0, err)
                 self.assertFalse((self.team / ".lock").exists())
                 self.assertEqual(self.view("BOARD.md"), before)
 
