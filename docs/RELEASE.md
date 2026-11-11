@@ -1,9 +1,9 @@
 # Release guide
 
-This describes the local release workflow for future maintainers. The current `0.1.0` candidate
-is local only and is licensed under the MIT License in the root `LICENSE` file. No remote is
-configured and no tag, public release, or upload has been made. MIT licensing does not by itself
-mean that this release candidate has been approved or published.
+This describes the release workflow for future maintainers. The source is public on GitHub at
+`origin` and is licensed under the MIT License in the root `LICENSE` file. There is no tagged
+release or packaged download yet. MIT licensing does not by itself mean that a release has been
+approved or published.
 
 ## Build and inspect the candidate
 
@@ -14,8 +14,8 @@ python3 scripts/build_release.py --check-first-commit
 ```
 
 This checks the first-commit allowlist and creates the deterministic allowlisted ZIP at
-`dist/agent-coordination-v0.1.0.zip`, with files under the visible root
-`agent-coordination-v0.1.0/`.
+`dist/agent-coordination-v0.2.0.zip`, with files under the visible root
+`agent-coordination-v0.2.0/`.
 
 Run the extracted-package smoke test:
 
@@ -63,12 +63,12 @@ Only after the owner approves the final contents, archive, and validation:
    release version.
 2. Run the build, extraction smoke, unit suite, and simulation above; review the output ZIP.
 3. Commit only the reviewed first-commit allowlist, then create the matching annotated tag, for
-   example `git tag -a v0.1.0 -m "Agent Coordination v0.1.0"`.
+   example `git tag -a v0.2.0 -m "Agent Coordination v0.2.0"`.
 4. Push the approved branch and tag to the owner-selected remote. The current workflow runs on
    `main`, pull requests, or manual dispatch; it does not publish a GitHub Release or run on tag
    pushes.
 5. Create a draft release in the selected hosting service, attach the reviewed
-   `dist/agent-coordination-v0.1.0.zip`, and leave it unpublished until the owner approves it.
+   `dist/agent-coordination-v0.2.0.zip`, and leave it unpublished until the owner approves it.
 
 These are future steps only. This session has not committed, configured a remote, pushed, or
 published anything.
