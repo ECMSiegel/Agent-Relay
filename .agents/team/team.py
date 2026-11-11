@@ -989,6 +989,24 @@ def cmd_next(team_dir: Path, args, agent: str) -> int:
         print("Claim one: team.py claim %s --agent %s" % (ready[0]["id"], agent))
     else:
         print("No tasks you can claim right now.")
+    config = load_config(team_dir)
+    agents_by_id = {a["id"]: a for a in load_agents(team_dir)}
+    takeovers = []
+    for task in tasks:
+        owner_id = task.get("owner")
+        owner = agents_by_id.get(owner_id)
+        if task["status"] not in LIVE_STATUSES or not owner_id or owner_id == USER:
+            continue
+        if owner is None or owner.get("status") == "left" or is_stale(
+                owner, config["stale_minutes"]):
+            takeovers.append(task)
+    takeovers.sort(key=lambda t: (t.get("priority", 2), _task_number(t["id"])))
+    if takeovers:
+        print("Tasks you can take over (owner stale or left):")
+        for task in takeovers:
+            print("  %s [p%s] %s; owner: %s. Reclaim: team.py reclaim %s --agent %s" % (
+                task["id"], task.get("priority"), task["title"], task.get("owner"),
+                task["id"], agent))
     for t in tasks:
         if t["status"] == "review" and t.get("owner") != agent:
             print("Awaiting review: %s %s (owner %s). Run: team.py review %s --agent %s "
@@ -1026,6 +1044,14 @@ def print_unread_line(team_dir: Path, agent_id: str) -> None:
     count = unread_count(team_dir, record)
     if count:
         print("%d unread message(s): team.py inbox --agent %s" % (count, agent_id))
+        cursor = record.get("inbox_cursor") or 0
+        direct = [m for m in read_jsonl(team_dir / "messages.jsonl")
+                  if m.get("id", 0) > cursor and m.get("to") == agent_id]
+        for message in direct[:3]:
+            task = " (%s)" % message["task"] if message.get("task") else ""
+            print("  #%s %s from %s [%s]%s: %s" % (
+                message["id"], message["at"], message["from"], message["kind"], task,
+                message["text"]))
 
 
 def cmd_status(team_dir: Path, args, agent: str | None) -> int:
@@ -1058,6 +1084,16 @@ def cmd_msg(team_dir: Path, args, agent: str) -> int:
         raise refuse("the user reads QUESTIONS.md, not an inbox",
                      'question --agent %s --text "..."' % agent)
     to = args.to
+    if to == "coordinator":
+        coordinators = coordinator_ids(team_dir, load_config(team_dir))
+        if not coordinators:
+            raise refuse("no active coordinator is available",
+                         'question --agent %s --text "..."' % agent)
+        for coordinator in coordinators:
+            send_message(team_dir, agent, coordinator, args.kind, args.text, args.task)
+        print("Sent message to coordinator%s: %s." % (
+            "s" if len(coordinators) != 1 else "", ", ".join(coordinators)))
+        return 0
     if to != "all":
         # Deliver to the stored ID's exact case: inbox matches the recipient case-sensitively.
         found = [a["id"] for a in load_agents(team_dir) if a["id"].lower() == to.lower()]
@@ -1114,6 +1150,7 @@ def cmd_discover(team_dir: Path, args, agent: str) -> int:
 def cmd_question(team_dir: Path, args, agent: str) -> int:
     touch_agent(team_dir, agent)
     qid = create_question(team_dir, agent, args.text, args.task)
+    _notify_coordinators(team_dir, agent, "%s opened: %s" % (qid, args.text), args.task)
     print('%s opened. The user answers with: team.py resolve %s --agent user --text "..."'
           % (qid, qid))
     return 0
@@ -1134,6 +1171,10 @@ def cmd_resolve(team_dir: Path, args, agent: str) -> int:
     if asker != USER and AGENT_ID_RE.match(asker or "") and agent_path(team_dir, asker).is_file():
         send_message(team_dir, agent, asker, "info",
                      "%s resolved: %s" % (question["id"], args.text), question.get("task"))
+    task_note = " for %s" % question["task"] if question.get("task") else ""
+    _notify_coordinators(team_dir, agent,
+                         "%s resolved%s by %s: %s" % (question["id"], task_note, agent, args.text),
+                         question.get("task"))
     print("%s resolved." % question["id"])
     return 0
 
@@ -1144,6 +1185,8 @@ def cmd_propose(team_dir: Path, args, agent: str) -> int:
                           "PLAN CHANGE PROPOSAL: %s \u2014 %s" % (args.title, args.text))
     send_message(team_dir, agent, "all", "info",
                  "Plan change proposed (%s): %s. Wait for the user's answer." % (qid, args.title))
+    _notify_coordinators(team_dir, agent,
+                         "%s plan change proposed: %s" % (qid, args.title), None)
     print("%s opened for the user: plan change proposal." % qid)
     return 0
 
@@ -1204,6 +1247,8 @@ def cmd_done(team_dir: Path, args, agent: str) -> int:
         task["status"] = "review"
         add_log(task, agent, "review requested", args.note)
         save_task(team_dir, task)
+        _notify_coordinators(team_dir, agent,
+                             "%s entered review: %s" % (task["id"], task["title"]), task["id"])
         print("%s is in review. It awaits review by another agent or the user "
               "(team.py review %s --agent user --approve)." % (task["id"], task["id"]))
         return 0
@@ -1264,6 +1309,9 @@ def _give_up(team_dir: Path, task_id: str, agent: str, note: str) -> int:
     add_log(task, agent, "handoff", note)
     save_task(team_dir, task)
     _clear_current_task(team_dir, agent, task["id"])
+    action = "released" if note == "released" else "handed off"
+    _notify_coordinators(team_dir, agent,
+                         "%s %s by %s: %s" % (task["id"], action, agent, note), task["id"])
     print("%s is available again with your note." % task["id"])
     return 0
 
@@ -1295,6 +1343,8 @@ def cmd_block(team_dir: Path, args, agent: str) -> int:
     task["updated_at"] = now_iso()
     add_log(task, agent, "blocked", "%s: %s" % (qid, args.reason))
     save_task(team_dir, task)
+    _notify_coordinators(team_dir, agent,
+                         "%s is blocked (%s): %s" % (task["id"], qid, args.reason), task["id"])
     print("%s is blocked. %s opened for the user; run team.py unblock %s --agent %s once it is "
           "answered." % (task["id"], qid, task["id"], agent))
     return 0
@@ -1369,12 +1419,32 @@ def cmd_reclaim(team_dir: Path, args, agent: str) -> int:
     owner = None
     if old and old != USER and AGENT_ID_RE.match(old) and agent_path(team_dir, old).is_file():
         owner = read_json(agent_path(team_dir, old))
-    if old == USER or (owner is not None and owner.get("status") != "left"
-                       and not is_stale(owner, load_config(team_dir)["stale_minutes"])):
+    config = load_config(team_dir)
+    override = agent == USER or me.get("role") == "coordinator"
+    owner_left_or_stale = old != USER and (owner is None or owner.get("status") == "left"
+                                           or is_stale(owner, config["stale_minutes"]))
+    if not override and not owner_left_or_stale:
         raise refuse("%s is owned by %s, who is active (last seen %s); reclaim works only after "
                      "the owner leaves or is stale for %s minutes" % (
-                         task["id"], old, (owner or {}).get("last_seen") or "now",
-                         load_config(team_dir)["stale_minutes"]), hint)
+                          task["id"], old, (owner or {}).get("last_seen") or "now",
+                          config["stale_minutes"]), hint)
+    if args.release:
+        stamp = now_iso()
+        note = ("Released from %s by %s. Registered paths may hold uncommitted edits; check them "
+                "before continuing." % (old, agent))
+        task["status"] = "available"
+        task["owner"] = None
+        task["claimed_at"] = None
+        task["updated_at"] = stamp
+        task["handoff"] = {"by": agent, "at": stamp, "text": note}
+        add_log(task, agent, "released from %s" % old, note)
+        save_task(team_dir, task)
+        _clear_current_task(team_dir, old, task["id"])
+        _notify_agent(team_dir, agent, old,
+                      "%s was released by %s and is available again: %s" %
+                      (task["id"], agent, note), task["id"])
+        print("Released %s from %s; it is available again." % (task["id"], old))
+        return 0
     # RECLAIM-CHECK-THEN-WRITE
     worktree_lines = _wt_on_take(team_dir, task)
     print("Reclaimed from %s." % old)
@@ -1391,7 +1461,8 @@ def cmd_reclaim(team_dir: Path, args, agent: str) -> int:
     task["owner"] = agent
     task["claimed_at"] = stamp
     task["updated_at"] = stamp
-    add_log(task, agent, "reclaimed from %s" % old)
+    event = "reclaimed from %s%s" % (old, " (override)" if override else "")
+    add_log(task, agent, event)
     save_task(team_dir, task)
     _clear_current_task(team_dir, old, task["id"])
     me["current_task"] = task["id"]
@@ -1872,8 +1943,25 @@ def cmd_complete(team_dir: Path, args, agent: str | None) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _notify_coordinators(team_dir: Path, sender: str, text: str, task_id: str | None) -> None:
+    """Send one informational message to each active coordinator except the sender."""
+    config = load_config(team_dir)
+    for coordinator in coordinator_ids(team_dir, config):
+        if coordinator != sender:
+            send_message(team_dir, sender, coordinator, "info", text, task_id)
+
+
 def cmd_busy(team_dir: Path, args, agent: str) -> int:
-    raise TeamError("not implemented yet")
+    me = touch_agent(team_dir, agent)
+    maximum = load_config(team_dir)["busy_max_minutes"]
+    if args.minutes < 1 or args.minutes > maximum:
+        raise TeamError("--minutes must be between 1 and %s" % maximum)
+    me["busy_until"] = (datetime.now(timezone.utc) + timedelta(minutes=args.minutes)).isoformat()
+    save_agent(team_dir, me)
+    text = "%s is busy for about %d minutes: %s" % (agent, args.minutes, args.text)
+    send_message(team_dir, agent, "all", "info", text)
+    print("Busy for about %d minutes." % args.minutes)
+    return 0
 
 
 # ---------------------------------------------------------------------------
