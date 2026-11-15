@@ -2,7 +2,7 @@
 
 A local task board that lets several coding agents work in one project folder without overwriting each other, and lets one agent pick up exactly where another stopped.
 
-I built it because I run Claude Code, Codex and OpenCode chats against the same project, and two things kept going wrong: agents edited the same files, and work was lost whenever a chat hit its usage limit. In a crowded environment with many solutions to multi-agent set ups and collaboration, I wanted a solution that worked with my existing subscriptions and didn't require me to use another harness. Agent Relay works with default desktop apps and subscriptions instead of API costs. Agent Relay is one Python file and a `team/` folder of plain files. There is no server, no account and nothing to install.
+I built it because I run Claude Code, Codex and OpenCode chats against the same project, and two things kept going wrong: agents edited the same files, and work was lost whenever a chat hit its usage limit. In a crowded environment with many multi-agent set-ups for collaboration, I wanted a solution that worked with my existing subscriptions and didn't require another harness. Agent Relay works with default desktop apps and subscriptions instead of API costs. Agent Relay is one Python file and a `team/` folder of plain files. There is no server, no account and nothing to install.
 
 ![The Agent Relay board: one lane per agent, a "Needs you" strip, and reported usage](docs/board.png)
 
